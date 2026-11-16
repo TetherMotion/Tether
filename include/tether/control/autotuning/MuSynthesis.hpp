@@ -174,11 +174,17 @@ struct MuAnalysisResult {
  * 
  * ## D-K Iteration Algorithm
  * 
- * 1. Initialize D = I
- * 2. K-step: Synthesize H∞ controller for scaled plant D*P*D⁻¹
- * 3. D-step: For each frequency, find D to minimize σ̄(DMD⁻¹)
- * 4. Fit rational D(s) to frequency data
- * 5. Check convergence, goto 2 if not converged
+ * synthesize() builds the mixed-sensitivity generalized plant (via the
+ * HInfinityController weight augmentation), appends the uncertainty
+ * channels, and runs MuSynthesisFramework::dkIterate():
+ * 1. K-step: H-infinity synthesis on the D-scaled generalized plant
+ * 2. D-step: static block-structured D minimizing max_w sigma_max(DMD^-1)
+ * 3. Iterate until convergence
+ *
+ * The Delta block is placed multiplicatively at the plant input (when its
+ * dimension equals m) or output (when it equals p), or via the static
+ * maps given to setInterconnection(). analyzeMu() then evaluates the true
+ * closed-loop Delta-channel transfer M(jw) and reports rigorous mu bounds.
  */
 class MuSynthesisController : public ControllerBase {
 public:
@@ -229,15 +235,24 @@ public:
     void clearUncertaintyBlocks();
     
     /**
-     * @brief Set interconnection matrices (M = F_u(P, Δ))
-     * 
+     * @brief Set custom interconnection matrices for the uncertainty channel
+     *
+     * When set, synthesize() uses these static maps for the Delta channels
+     * instead of the default input/output multiplicative interpretation:
+     * z_delta = P11*w_delta + P12*u   and   y_meas += P21*w_delta (+P22*u).
+     * Requires nz == nw == total Delta dimension, ne == plant outputs,
+     * nu == plant inputs, and P22 must be (numerically) zero because the
+     * DGKF synthesis assumes D22 = 0. If unset, the Delta block is placed
+     * multiplicatively at the plant input (when its dimension equals m)
+     * or at the plant output (when it equals p).
+     *
      * P is partitioned as:
      * [z]   [P11 P12] [w]
      * [e] = [P21 P22] [u]
-     * @param P11 w→z block (row-major)
-     * @param P12 u→z block
-     * @param P21 w→e block
-     * @param P22 u→e block
+     * @param P11 w→z block (row-major, nz×nw)
+     * @param P12 u→z block (nz×nu)
+     * @param P21 w→e block (ne×nw)
+     * @param P22 u→e block (ne×nu)
      * @param nz Performance output dimension
      * @param ne Measurement output dimension
      * @param nw Exogenous input dimension
@@ -402,8 +417,26 @@ private:
     // Controller state
     std::array<double, MAX_CONTROLLER_DIM> m_xk{};
     
-    // D-scales (for each frequency point)
-    DScaleFit m_dScales;
+    // Extended generalized plant: the weight-augmented plant produced by
+    // HInfinityController, extended with the trailing uncertainty channels
+    // (w_delta inputs, z_delta outputs). Retained so that analyzeMu() can
+    // evaluate the true closed-loop Delta-channel transfer M(jw).
+    std::vector<double> m_gA, m_gB1, m_gB2, m_gC1, m_gC2;
+    std::vector<double> m_gD11, m_gD12, m_gD21, m_gD22;
+    int m_gn{0}, m_gnw{0}, m_gnu{0}, m_gnz{0}, m_gny{0};
+    int m_gUncW{0}, m_gUncZ{0};
+    bool m_hasGen{false};
+    int m_deltaPlace{0};  // 0 none, 1 input-multiplicative, 2 output-multiplicative, 3 interconnection
+    
+    // Interconnection matrices from setInterconnection() (row-major)
+    std::vector<double> m_P11, m_P12, m_P21, m_P22;
+    int m_nzI{0}, m_neI{0}, m_nwI{0}, m_nuI{0};
+    bool m_hasInterconnection{false};
+    
+    // Weight parameters mirrored for HInfinityController setup
+    double m_w1M{2.0}, m_w1wB{10.0}, m_w1eps{0.01};
+    double m_w2maxU{50.0};
+    double m_w3M{2.0}, m_w3wT{100.0}, m_w3eps{0.01};
     
     // Analysis results
     MuAnalysisResult m_muResult;
@@ -411,11 +444,8 @@ private:
     bool m_synthesized{false};
     
     // Internal methods
-    void buildAugmentedPlant();
-    bool dStep(const std::vector<double>& frequencies);
-    bool kStep(double gamma);
-    void fitDScales(const std::vector<double>& frequencies, int order);
-    std::complex<double> evaluateClosedLoop(double omega) const;
+    void evalMuMatrix(double omega, std::complex<double>* M) const;
+    double evalLoopNorm(double omega) const;
 };
 
 // ============================================================================

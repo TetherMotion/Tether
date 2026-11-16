@@ -638,8 +638,10 @@ private:
  * @brief Structured Singular Value (μ) Analysis
  * 
  * μ-analysis and D-K iteration for structured uncertainty.
- * This is a framework class; full implementation would require
- * external optimization libraries.
+ * D-K alternates a D-scaling fit (coordinate descent on log-scales over a
+ * frequency grid) with an H-infinity K-step on the D-scaled generalized
+ * plant. Static (frequency-independent) D only; rational D(s) fitting is
+ * not performed.
  * 
  * ## Structured Uncertainty
  * Unlike H∞ which handles unstructured uncertainty, μ handles
@@ -777,7 +779,7 @@ private:
     int m_nDPar{0};
 
     // Generalized plant for D-K iteration
-    static constexpr int MAX_MU_N = MAX_STATE_DIM;    // 12
+    static constexpr int MAX_MU_N = 2 * MAX_STATE_DIM;  // 24 (weight-augmented plants)
     int m_n{0}, m_nw{0}, m_nu{0}, m_nz{0}, m_ny{0};
     int m_nUncW{0}, m_nUncZ{0};
     bool m_hasPlant{false};
