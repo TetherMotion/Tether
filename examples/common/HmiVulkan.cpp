@@ -907,16 +907,19 @@ bool createSwapchain(HmiRenderer::Impl& im, HmiWin& w, int reqW, int reqH) {
     std::vector<vk::PresentModeKHR> modes =
         phys.getSurfacePresentModesKHR(w.surface);
 
+    // The shared render pass (created in finishInit) is R8G8B8A8Unorm —
+    // the swapchain must use the same format or rendering is invalid.
     vk::SurfaceFormatKHR fmt = fmts.empty()
-        ? vk::SurfaceFormatKHR{vk::Format::eB8G8R8A8Unorm,
+        ? vk::SurfaceFormatKHR{vk::Format::eR8G8B8A8Unorm,
                                vk::ColorSpaceKHR::eSrgbNonlinear}
         : fmts[0];
+    bool fmtOk = fmts.empty();   // empty list = any format supported
     for (const auto& f : fmts) {
-        if (f.format == vk::Format::eB8G8R8A8Unorm ||
-            f.format == vk::Format::eR8G8B8A8Unorm) {
-            fmt = f;
-            break;
-        }
+        if (f.format == vk::Format::eR8G8B8A8Unorm) { fmt = f; fmtOk = true; break; }
+    }
+    if (!fmtOk) {
+        std::fprintf(stderr, "hmi: surface lacks R8G8B8A8Unorm format\n");
+        return false;
     }
     vk::PresentModeKHR pm = vk::PresentModeKHR::eFifo;
     for (auto m : modes)
@@ -935,6 +938,16 @@ bool createSwapchain(HmiRenderer::Impl& im, HmiWin& w, int reqW, int reqH) {
     uint32_t count = std::max(2u, caps.minImageCount);
     if (caps.maxImageCount > 0) count = std::min(count, caps.maxImageCount);
 
+    vk::CompositeAlphaFlagBitsKHR ca =
+        vk::CompositeAlphaFlagBitsKHR::eOpaque;
+    if (!(caps.supportedCompositeAlpha &
+          vk::CompositeAlphaFlagBitsKHR::eOpaque)) {
+        ca = caps.supportedCompositeAlpha &
+                 vk::CompositeAlphaFlagBitsKHR::eInherit
+             ? vk::CompositeAlphaFlagBitsKHR::eInherit
+             : vk::CompositeAlphaFlagBitsKHR::ePreMultiplied;
+    }
+
     vk::SwapchainCreateInfoKHR sci;
     sci.surface = w.surface;
     sci.minImageCount = count;
@@ -945,7 +958,7 @@ bool createSwapchain(HmiRenderer::Impl& im, HmiWin& w, int reqW, int reqH) {
     sci.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
     sci.imageSharingMode = vk::SharingMode::eExclusive;
     sci.preTransform = caps.currentTransform;
-    sci.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+    sci.compositeAlpha = ca;
     sci.presentMode = pm;
     sci.clipped = VK_TRUE;
     sci.oldSwapchain = w.swapchain;
