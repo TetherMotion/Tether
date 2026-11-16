@@ -1,6 +1,6 @@
 /**
  * @file motion_planner_stub.cpp
- * @brief Stub Python bindings for Motion Replanner
+ * @brief Stub Python bindings for LiveTune
  */
 
 #include <pybind11/pybind11.h>

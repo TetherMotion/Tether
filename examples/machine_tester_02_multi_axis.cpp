@@ -14,7 +14,7 @@
 #include "TestDataExporter.hpp"
 #include "PerformanceHeatmap.hpp"
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 int main() {
     std::cout << "=== Machine Tester Example 2: Multi-Axis Circular Motion ===" << std::endl;

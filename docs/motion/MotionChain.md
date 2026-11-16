@@ -658,25 +658,28 @@ for a plan, or generate them incrementally.
 
 ---
 
-## Replanning
+## Feedback Analysis & Tuning
 
-The motion chain supports replanning during execution via the
-`motion_replanner` component:
+The motion chain is supported by the `livetune` component, which
+provides closed-loop feedback analysis, machine identification, and
+nearline re-profiling tools:
 
 | Class | File | Role |
 |---|---|---|
-| `ProfileReplanner` | `include/tether/motion_replanner/ProfileReplanner.hpp` | Re-compute velocity profile for a path |
-| `OnlineReblender` | `include/tether/motion_replanner/OnlineReblender.hpp` | Re-blend path corners online |
+| `ProfileReplanner` | `include/tether/livetune/ProfileReplanner.hpp` | Re-compute velocity profile for a path |
+| `OnlineReblender` | `include/tether/livetune/OnlineReblender.hpp` | Re-blend path corners online |
 
-Replanning is used when:
+These tools are used between moves or between job runs when:
 - The feed rate override changes significantly (requiring a new profile)
-- A new segment is appended to an in-progress plan
-- Corner tolerances are adjusted mid-print
+- Measured contour error suggests a junction should be re-blended
+- Corner tolerances or machine limits are adjusted
 
-The replanner uses the same `VelocityProfiler` interface, so the
-profiler choice applies to replanning as well.
+They consume and produce the same `VelocityProfiler`-compatible
+profile representation, so the profiler choice applies to re-profiling
+as well. Note this is analysis and nearline tuning — it does not modify
+motion already executing in the step queue.
 
-See `docs/MotionReplanner.md` for details.
+See `docs/LiveTune.md` for details.
 
 ---
 
@@ -692,5 +695,5 @@ See `docs/MotionReplanner.md` for details.
 | [AlgorithmComparison.md](AlgorithmComparison.md) | Design decisions and rejected alternatives |
 | [ImplementationGuide.md](ImplementationGuide.md) | How to read and extend the motion planner code |
 | [KlipperArchitecture.md](../KlipperArchitecture.md) | Klipper module architecture and threading |
-| [MotionReplanner.md](../MotionReplanner.md) | Online replanning |
+| [LiveTune.md](../LiveTune.md) | Feedback analysis & parameter tuning |
 | [Extrusion docs](../extrusion/NonNewtonianPressureAdvance.md) | Pressure advance and non-Newtonian compensation |

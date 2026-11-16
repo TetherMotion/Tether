@@ -7,7 +7,7 @@
 #include "PerformanceHeatmap.hpp"
 #include <cmath>
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 class Heatmap1DTest : public ::testing::Test {
 protected:

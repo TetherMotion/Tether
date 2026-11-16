@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | **Status** | PLANNING — not yet implemented |
-| **Scope** | `tether::motion::profile_renurbs` (new component), `MotionPlanner::VelocityProfile` extension, `MotionReplanner::SvgExporter` consumer |
+| **Scope** | `tether::motion::profile_renurbs` (new component), `MotionPlanner::VelocityProfile` extension, `LiveTune::SvgExporter` consumer |
 | **Depends on** | `tether::motion::NurbsCurve`, `MotionPlanner::VelocityProfile<T>`, `MotionPlanner::KinematicLimits`, existing `DeviationCertifier` / `CertifiedCurvatureSampler` Lipschitz patterns |
 | **Opt-in** | API optional; default OFF. Enabled per-build via `TETHER_ENABLE_RENURBS` and per-plan via `MotionPlanConfig::enableReNURBS` |
 | **Target continuity** | v(s): C³/G³, a(s): C²/G², j(s): C¹/G¹, t(s): C³/G³ — *where the source profile permits* (see §5 Edge Cases for the basic-TOPP-RA caveat) |
@@ -18,9 +18,9 @@
 The current pipeline (see `docs/motion/MotionChain.md` Step 4) produces a
 `VelocityProfile<T>` — a tabulated `v(s)` (plus `a(s)`, `j(s)`, `t(s)`) sampled
 at `numSamples` points (default 100, often 1000+ for long paths). The
-visualization layer (`MotionReplanner::SvgExporter::renderVelocityProfile` /
+visualization layer (`LiveTune::SvgExporter::renderVelocityProfile` /
 `renderAccelerationProfile`) renders these as SVG `<polyline>` elements with one
-vertex per sample <ref_snippet file="/home/uli/dev/Tether/src/replanner/SvgExporter.cpp" lines="568-606" />.
+vertex per sample <ref_snippet file="/home/uli/dev/Tether/src/livetune/SvgExporter.cpp" lines="568-606" />.
 
 For shaped velocity curves (jerk-limited TOPP-RA on a path with many curvature
 transitions), this means:
@@ -131,7 +131,7 @@ and audit tooling.
 |---|---|
 | `include/tether/motion_planner/MotionPlan.hpp` | Add `std::optional<ReNURBSProfile> renurbsProfile_` + accessor; `MotionPlanConfig::enableReNURBS` flag |
 | `include/tether/motion_planner/MotionPlan.hpp` (`MotionPlanBuilder::build`) | After computing the sampled profile, if `config.enableReNURBS`, call `ReNURBSProfileBuilder::build` and attach |
-| `include/tether/motion_replanner/SvgExporter.hpp` / `.cpp` | New `SvgPlotType::NurbsVelocityProfile` etc. that render the NURBS curves via adaptive sampling of the *curve* (not the original samples) — see §6 |
+| `include/tether/livetune/SvgExporter.hpp` / `.cpp` | New `SvgPlotType::NurbsVelocityProfile` etc. that render the NURBS curves via adaptive sampling of the *curve* (not the original samples) — see §6 |
 | `tests/CMakeLists.txt` | Add `profile_renurbs` test executable (GLOB, mirroring `motion_planner/geometry/`) |
 | `CMakeLists.txt` (root) | `option(TETHER_ENABLE_RENURBS "Enable ReNURBS profile representation" ON)` — on by default but inert unless `MotionPlanConfig::enableReNURBS` is set |
 | `AGENTS.md` | Append build/test commands for the new target |
@@ -309,7 +309,7 @@ The `NurbsCurve` constructor requires `dim ≥ 1` and accepts 1-D curves
 
 ### 6.1 New SvgPlotTypes
 
-Add to `SvgPlotType` <ref_snippet file="/home/uli/dev/Tether/include/tether/motion_replanner/SvgExporter.hpp" lines="134-152" />:
+Add to `SvgPlotType` <ref_snippet file="/home/uli/dev/Tether/include/tether/livetune/SvgExporter.hpp" lines="134-152" />:
 
 - `NurbsVelocityProfile` — render `v_NURBS(s)` vs `t` (or vs `s`) by sampling the
   NURBS curve adaptively (e.g. 32 points per NURBS piece — far fewer than the

@@ -14,7 +14,7 @@
 #include "SystemIdentifier.hpp"
 #include "TestDataExporter.hpp"
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 int main() {
     std::cout << "=== Machine Tester Example 3: System Identification ===" << std::endl;

@@ -51,7 +51,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    :maxdepth: 2
    :caption: Motion
 
-   MotionReplanner
+   OnlineTuner
    SnapSpaceVelocityProfiler
    motion/Architecture
    motion/GeometryFoundations
@@ -119,7 +119,7 @@ The Tether library provides components for:
 - Control algorithms (PID, motion profiles)
 - G-code parsing and trajectory generation
 - EtherCAT master and slave implementations
-- Motion planning and replanning
+- Motion planning and feedback tuning
 - Simulation systems
 
 Indices and tables

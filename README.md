@@ -146,8 +146,8 @@ profile-aware emulation.
 - **Velocity profilers** — trapezoidal, S-curve (`SCurveVelocityProfiler`),
   and snap-space profiling (`SnapSpaceVelocityProfiler`)
 - **ReNURBS** curve geometry (`profile_renurbs`, `ReNURBS.md`)
-- **Motion replanner** — online re-planning and machine identification
-  (`docs/MotionReplanner.md`)
+- **LiveTune** — feedback analysis, parameter tuning, and machine
+  identification (`docs/LiveTune.md`)
 - **Kinematics** — Cartesian, delta, and rotary-delta printer kinematics,
   forward/inverse transforms
 
@@ -531,7 +531,7 @@ plus a Doxygen `Doxyfile`):
   controllers, LPV deconvolution)
 - **Platform** — `docs/HAL_PORTING_GUIDE.md`, `docs/CrossCompiling.md`,
   `docs/IOProtocol.md`, `docs/IOProtocolWireFormat.md`, `docs/ModelIdentification.md`,
-  `docs/MotionReplanner.md`
+  `docs/LiveTune.md`
 
 `AGENTS.md` contains a project guide with build/test commands and architecture
 notes for AI agents and contributors.

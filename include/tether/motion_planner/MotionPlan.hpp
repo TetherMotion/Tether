@@ -231,7 +231,7 @@ public:
      * @brief Construct from path, velocity profile, and kinematic limits
      *
      * The limits are stored for reference and downstream use (e.g. by
-     * the motion replanner). The velocity profile is consumed as-is —
+     * the live tuner). The velocity profile is consumed as-is —
      * no post-hoc smoothing is applied. The profiler that produced the
      * profile is responsible for respecting all constraints.
      *

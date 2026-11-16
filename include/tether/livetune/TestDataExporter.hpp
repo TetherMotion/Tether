@@ -1,0 +1,617 @@
+/**
+ * @file TestDataExporter.hpp
+ * @brief Export test data for documentation and visualization
+ * 
+ * Provides comprehensive data export in multiple formats:
+ * - CSV for raw data analysis
+ * - JSON for structured data interchange
+ * - Binary for efficient storage
+ */
+
+#pragma once
+
+#include "OnlineTuner.hpp"
+#include "PerformanceHeatmap.hpp"
+#include "MachineTester.hpp"
+#include "SystemIdentifier.hpp"
+#include "PathEvaluator.hpp"
+#include "PathRelativeFFT.hpp"
+#include "SvgExporter.hpp"
+#include <string>
+#include <vector>
+#include <map>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <functional>
+
+namespace LiveTune {
+
+//=============================================================================
+// Data Structures
+//=============================================================================
+
+/**
+ * @brief Export format options
+ */
+enum class ExportFormat {
+    CSV, /**< Comma-separated values */
+    TSV, /**< Tab-separated values */
+    JSON, /**< JSON format */
+    JSONPretty, /**< Pretty-printed JSON */
+    Binary, /**< Binary format for efficiency */
+    Numpy, /**< NumPy-compatible binary */
+    SVG /**< SVG vector graphics */
+};
+
+/**
+ * @brief Export configuration
+ */
+struct ExportConfig {
+    ExportFormat format = ExportFormat::CSV;
+    char delimiter = ',';
+    int precision = 6;
+    bool includeHeader = true;
+    bool includeTimestamp = true;
+    bool includeMetadata = true;
+    bool compressOutput = false;
+    std::string timestampFormat = "%Y-%m-%d %H:%M:%S";
+    
+    // Column selection
+    std::vector<std::string> selectedColumns; /**< Empty = all columns */
+    
+    // Filtering
+    double timeStart = 0;
+    double timeEnd = -1; /**< -1 = no end limit */
+    int downsampleFactor = 1;
+};
+
+/**
+ * @brief Metadata for exported data
+ */
+struct ExportMetadata {
+    std::string testName;
+    std::string testType;
+    std::string machineId;
+    std::string timestamp;
+    std::string version = "1.0";
+    std::map<std::string, std::string> customFields;
+    
+    // Test parameters
+    double sampleRate = 0;
+    size_t sampleCount = 0;
+    double duration = 0;
+    
+    // Summary statistics (optional)
+    std::map<std::string, double> statistics;
+};
+
+//=============================================================================
+// Base Exporter
+//=============================================================================
+
+/**
+ * @brief Base class for data exporters
+ */
+class DataExporter {
+public:
+    explicit DataExporter(const ExportConfig& config = {});
+    virtual ~DataExporter() = default;
+    
+    void setConfig(const ExportConfig& config) { config_ = config; }
+    const ExportConfig& config() const { return config_; }
+    
+    void setMetadata(const ExportMetadata& metadata) { metadata_ = metadata; }
+    const ExportMetadata& metadata() const { return metadata_; }
+    
+protected:
+    ExportConfig config_;
+    ExportMetadata metadata_;
+    
+public:
+    // Helper methods
+    std::string formatDouble(double value) const;
+    std::string escapeCSV(const std::string& str) const;
+    std::string escapeJSON(const std::string& str) const;
+    std::string getCurrentTimestamp() const;
+};
+
+//=============================================================================
+// Trajectory Data Exporter
+//=============================================================================
+
+/**
+ * @brief Export trajectory and tracking data
+ */
+class TrajectoryExporter : public DataExporter {
+public:
+    using DataExporter::DataExporter;
+    
+    /**
+     * @brief Export desired vs actual trajectory
+     * @param filename Destination path (CSV).
+     * @param desired Commanded samples.
+     * @param actual Measured samples (same timeline).
+     * @return true when the file was written.
+     */
+    bool exportTrajectory(const std::string& filename,
+                         const std::vector<GCodeExport::TrajectorySample>& desired,
+                         const std::vector<GCodeExport::TrajectorySample>& actual);
+    
+    /**
+     * @brief Export tracking error analysis
+     * @param filename Destination path (CSV).
+     * @param errors Per-sample tracking errors.
+     * @return true when the file was written.
+     */
+    bool exportTrackingErrors(const std::string& filename,
+                             const std::vector<TrackingError>& errors);
+    
+    /**
+     * @brief Export segment performance data
+     * @param filename Destination path (CSV).
+     * @param segments Per-segment metrics.
+     * @return true when the file was written.
+     */
+    bool exportSegmentPerformance(const std::string& filename,
+                                  const std::vector<SegmentPerformance>& segments);
+    
+    /**
+     * @brief Export error statistics
+     * @param filename Destination path (CSV).
+     * @param stats Aggregate error statistics.
+     * @return true when the file was written.
+     */
+    bool exportErrorStatistics(const std::string& filename,
+                              const ErrorStatistics& stats);
+    
+    /**
+     * @brief Export parameter suggestions
+     * @param filename Destination path (CSV).
+     * @param suggestions Tuning recommendations to persist.
+     * @return true when the file was written.
+     */
+    bool exportSuggestions(const std::string& filename,
+                          const std::vector<ParameterSuggestion>& suggestions);
+    
+private:
+    void writeCSVTrajectory(std::ostream& out,
+                           const std::vector<GCodeExport::TrajectorySample>& desired,
+                           const std::vector<GCodeExport::TrajectorySample>& actual);
+    
+    void writeJSONTrajectory(std::ostream& out,
+                            const std::vector<GCodeExport::TrajectorySample>& desired,
+                            const std::vector<GCodeExport::TrajectorySample>& actual);
+};
+
+//=============================================================================
+// Heatmap Data Exporter
+//=============================================================================
+
+/**
+ * @brief Export heatmap data for visualization
+ */
+class HeatmapExporter : public DataExporter {
+public:
+    using DataExporter::DataExporter;
+    
+    /**
+     * @brief Export 1D heatmap data
+     * @param filename Destination path (CSV).
+     * @param heatmap Sampled 1D metric.
+     * @return true when the file was written.
+     */
+    bool exportHeatmap1D(const std::string& filename, const Heatmap1D& heatmap);
+    
+    /**
+     * @brief Export 2D heatmap data
+     * @param filename Destination path (CSV grid).
+     * @param heatmap Sampled 2D metric.
+     * @return true when the file was written.
+     */
+    bool exportHeatmap2D(const std::string& filename, const Heatmap2D& heatmap);
+    
+    /**
+     * @brief Export 3D heatmap data
+     * @param filename Destination path (CSV).
+     * @param heatmap Sampled 3D metric.
+     * @return true when the file was written.
+     */
+    bool exportHeatmap3D(const std::string& filename, const Heatmap3D& heatmap);
+    
+    /**
+     * @brief Export differential heatmap
+     * @param filename Destination path (CSV).
+     * @param heatmap Difference between two 2D maps.
+     * @return true when the file was written.
+     */
+    bool exportDifferentialHeatmap(const std::string& filename,
+                                   const DifferentialHeatmap& heatmap);
+    
+    /**
+     * @brief Export suggested limits
+     * @param filename Destination path (CSV).
+     * @param limits Limits derived from the heatmap analysis.
+     * @return true when the file was written.
+     */
+    bool exportSuggestedLimits(const std::string& filename,
+                              const SuggestedLimits& limits);
+    
+private:
+    void writeCSVHeatmap2D(std::ostream& out, const Heatmap2D& heatmap);
+    void writeJSONHeatmap2D(std::ostream& out, const Heatmap2D& heatmap);
+    void writeNumpyHeatmap2D(std::ostream& out, const Heatmap2D& heatmap);
+};
+
+//=============================================================================
+// Test Result Exporter
+//=============================================================================
+
+/**
+ * @brief Export machine test results
+ */
+class TestResultExporter : public DataExporter {
+public:
+    using DataExporter::DataExporter;
+    
+    /**
+     * @brief Export complete test result
+     * @param filename Destination path (JSON/CSV bundle per config).
+     * @param result Full test result to serialize.
+     * @return true when the file was written.
+     */
+    bool exportTestResult(const std::string& filename, const TestResult& result);
+    
+    /**
+     * @brief Export friction identification result
+     * @param filename Destination path.
+     * @param result Identified friction parameters.
+     * @return true when the file was written.
+     */
+    bool exportFrictionModel(const std::string& filename,
+                            const FrictionIdentificationResult& result);
+    
+    /**
+     * @brief Export delay identification result
+     * @param filename Destination path.
+     * @param result Identified transport/loop delay.
+     * @return true when the file was written.
+     */
+    bool exportDelayIdentification(const std::string& filename,
+                                   const DelayIdentificationResult& result);
+    
+    /**
+     * @brief Export PID tuning assessment
+     * @param filename Destination path.
+     * @param assessment Per-axis tuning verdict.
+     * @return true when the file was written.
+     */
+    bool exportPIDAssessment(const std::string& filename,
+                            const PIDTuningAssessment& assessment);
+    
+    /**
+     * @brief Export dynamics identification
+     * @param filename Destination path.
+     * @param result Identified plant model.
+     * @return true when the file was written.
+     */
+    bool exportDynamicsModel(const std::string& filename,
+                            const DynamicsIdentificationResult& result);
+    
+private:
+    void writeCSVTestResult(std::ostream& out, const TestResult& result);
+    void writeJSONTestResult(std::ostream& out, const TestResult& result);
+};
+
+//=============================================================================
+// Batch Exporter
+//=============================================================================
+
+/**
+ * @brief Export multiple files in batch
+ */
+class BatchExporter {
+public:
+    explicit BatchExporter(const std::string& outputDir, const ExportConfig& config = {});
+    
+    /**
+     * @brief Set base filename prefix
+     * @param prefix Prefix prepended to every generated filename.
+     */
+    void setPrefix(const std::string& prefix) { prefix_ = prefix; }
+    
+    /**
+     * @brief Export all livetune data
+     * @param livetune tuner whose traces are dumped.
+     */
+    void exportTunerData(const OnlineTuner& livetune);
+    
+    /**
+     * @brief Export all heatmap data
+     * @param builder Heatmap source to serialize.
+     */
+    void exportHeatmapData(const HeatmapBuilder& builder);
+    
+    /**
+     * @brief Export all test results
+     * @param results Test results to serialize.
+     */
+    void exportTestResults(const std::vector<TestResult>& results);
+    
+    /**
+     * @brief Export system identification data
+     * @param identifier System identification results.
+     * @param delay Identified delay.
+     * @param friction Identified friction model.
+     * @param pid PID tuning assessment.
+     */
+    void exportIdentificationData(const SystemIdentifier& identifier,
+                                  const DelayIdentificationResult& delay,
+                                  const FrictionIdentificationResult& friction,
+                                  const PIDTuningAssessment& pid);
+
+    /**
+     * @brief Export complete path evaluation data (quantitative, qualitative,
+     *        spectral, and all SVG plots).
+     *
+     * @param desired Desired trajectory samples.
+     * @param actual Actual trajectory samples.
+     * @param quant Quantitative evaluation results.
+     * @param spectral Spectral evaluation results.
+     * @param qual Qualitative evaluation results.
+     * @param svgConfig SVG export configuration (optional, uses defaults if
+     *        not specified).
+     */
+    void exportEvaluationData(
+        const std::vector<GCodeExport::TrajectorySample>& desired,
+        const std::vector<GCodeExport::TrajectorySample>& actual,
+        const tether::motion::livetune::QuantitativeEvaluation& quant,
+        const tether::motion::livetune::SpectralEvaluation& spectral,
+        const tether::motion::livetune::QualitativeEvaluation& qual,
+        const SvgConfig& svgConfig = {});
+
+    /**
+     * @brief Export KDE derivative-vs-deviation analysis data.
+     *
+     * Exports:
+     * - Raw (derivative, deviation) sample pairs as CSV
+     * - KDE density grid as CSV (matrix format)
+     * - KDE density grid as JSON (with metadata)
+     * - Conditional statistics as CSV
+     * - Marginal statistics as CSV
+     * - Dependence metrics as CSV
+     * - Threshold analysis as CSV
+     * - Tail risk metrics as CSV
+     * - SVG heatmap, conditional, marginal, and dashboard plots
+     *
+     * @param kde The KDE evaluation to export.
+     * @param svgConfig SVG export configuration (optional).
+     */
+    void exportKdeData(
+        const tether::motion::livetune::KdeEvaluation& kde,
+        const SvgConfig& svgConfig = {});
+    
+    /**
+     * @brief Generate manifest file listing all exported files
+     * @param filename Destination path (Markdown index).
+     * @return true when the manifest was written.
+     */
+    bool generateManifest(const std::string& filename);
+    
+    /**
+     * @brief Get list of generated files
+     * @return Paths of every file written by this exporter so far.
+     */
+    const std::vector<std::string>& generatedFiles() const { return generatedFiles_; }
+    
+private:
+    std::string outputDir_;
+    std::string prefix_;
+    ExportConfig config_;
+    std::vector<std::string> generatedFiles_;
+    
+    std::string makeFilename(const std::string& baseName, const std::string& extension);
+};
+
+//=============================================================================
+// Streaming Exporter (for real-time data)
+//=============================================================================
+
+/**
+ * @brief Stream data to file in real-time
+ */
+class StreamingExporter {
+public:
+    StreamingExporter(const std::string& filename, const ExportConfig& config = {});
+    ~StreamingExporter();
+    
+    /**
+     * @brief Open file for writing
+     * @return true when the file was opened.
+     */
+    bool open();
+    
+    /**
+     * @brief Close file
+     */
+    void close();
+    
+    /**
+     * @brief Check if open
+     * @return true while the stream is open.
+     */
+    bool isOpen() const { return file_.is_open(); }
+    
+    /**
+     * @brief Write header
+     * @param columns Column names written as the first CSV row.
+     */
+    void writeHeader(const std::vector<std::string>& columns);
+    
+    /**
+     * @brief Write data row
+     * @param values Numeric cells for one row.
+     */
+    void writeRow(const std::vector<double>& values);
+    /**@param values String cells for one row. */
+    void writeRow(const std::vector<std::string>& values);
+    
+    /**
+     * @brief Write trajectory sample
+     * @param desired Commanded sample.
+     * @param actual Measured sample.
+     */
+    void writeSample(const GCodeExport::TrajectorySample& desired,
+                    const GCodeExport::TrajectorySample& actual);
+    
+    /**
+     * @brief Write tracking error
+     * @param error Per-sample tracking error.
+     */
+    void writeError(const TrackingError& error);
+    
+    /**
+     * @brief Flush to disk
+     */
+    void flush();
+    
+    /**
+     * @brief Get bytes written
+     * @return Number of bytes flushed to the file so far.
+     */
+    size_t bytesWritten() const { return bytesWritten_; }
+    
+private:
+    std::string filename_;
+    ExportConfig config_;
+    std::ofstream file_;
+    size_t bytesWritten_;
+    bool headerWritten_;
+};
+
+//=============================================================================
+// Report Generator
+//=============================================================================
+
+/**
+ * @brief Generate comprehensive test reports
+ */
+class ReportGenerator {
+public:
+    struct ReportSection {
+        std::string title;
+        std::string content;
+        std::vector<std::string> figures; /**< Paths to associated figures */
+        std::vector<std::string> tables; /**< Paths to associated data files */
+    };
+    
+    ReportGenerator();
+    
+    /**
+     * @brief Add section to report
+     * @param section Pre-rendered section to append.
+     */
+    void addSection(const ReportSection& section);
+    
+    /**
+     * @brief Generate summary section from test results
+     * @param results Test results summarised into the report.
+     */
+    void addSummary(const std::vector<TestResult>& results);
+    
+    /**
+     * @brief Generate error statistics section
+     * @param stats Aggregate error statistics.
+     */
+    void addErrorStatistics(const ErrorStatistics& stats);
+    
+    /**
+     * @brief Generate system identification section
+     * @param delay Identified delay.
+     * @param friction Identified friction model.
+     * @param pid PID tuning assessment.
+     */
+    void addSystemIdentification(const DelayIdentificationResult& delay,
+                                 const FrictionIdentificationResult& friction,
+                                 const PIDTuningAssessment& pid);
+    
+    /**
+     * @brief Generate recommendations section
+     * @param suggestions Tuning recommendations to include.
+     */
+    void addRecommendations(const std::vector<ParameterSuggestion>& suggestions);
+    
+    /**
+     * @brief Export as Markdown
+     * @param filename Destination path.
+     * @return true when the report was written.
+     */
+    bool exportMarkdown(const std::string& filename);
+    
+    /**
+     * @brief Export as HTML
+     * @param filename Destination path.
+     * @return true when the report was written.
+     */
+    bool exportHTML(const std::string& filename);
+    
+    /**
+     * @brief Export as LaTeX
+     * @param filename Destination path.
+     * @return true when the report was written.
+     */
+    bool exportLaTeX(const std::string& filename);
+    
+private:
+    std::vector<ReportSection> sections_;
+    ExportMetadata metadata_;
+    
+    std::string generateMarkdownTable(const std::vector<std::vector<std::string>>& data,
+                                     const std::vector<std::string>& headers);
+};
+
+//=============================================================================
+// JSON Helper
+//=============================================================================
+
+/**
+ * @brief Simple JSON builder
+ */
+class JSONBuilder {
+public:
+    JSONBuilder(bool pretty = false);
+    
+    void beginObject();
+    void endObject();
+    void beginArray();
+    void endArray();
+    
+    void key(const std::string& k);
+    void value(const std::string& v);
+    void value(double v);
+    void value(int v);
+    void value(bool v);
+    void valueNull();
+    
+    void keyValue(const std::string& k, const std::string& v);
+    void keyValue(const std::string& k, double v);
+    void keyValue(const std::string& k, int v);
+    void keyValue(const std::string& k, bool v);
+    
+    // Array of doubles (efficient)
+    void doubleArray(const std::string& key, const std::vector<double>& values);
+    void doubleArray(const std::vector<double>& values);
+    
+    std::string str() const { return ss_.str(); }
+    
+private:
+    std::ostringstream ss_;
+    bool pretty_;
+    int indent_;
+    bool needComma_;
+    
+    void newline();
+    void comma();
+};
+
+} // namespace LiveTune

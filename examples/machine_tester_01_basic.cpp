@@ -12,7 +12,7 @@
 #include "MachineTester.hpp"
 #include "TestDataExporter.hpp"
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 int main() {
     std::cout << "=== Machine Tester Example 1: Basic Single-Axis Test ===" << std::endl;

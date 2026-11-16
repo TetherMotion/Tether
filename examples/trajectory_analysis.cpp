@@ -2,16 +2,16 @@
  * @file trajectory_analysis.cpp
  * @brief Example: Trajectory analysis with error statistics
  * 
- * Demonstrates how to use the MotionReplanner to analyze trajectory
+ * Demonstrates how to use the OnlineTuner to analyze trajectory
  * execution with commanded vs actual positions, including corner detection.
  */
 
-#include "MotionReplanner.hpp"
+#include "OnlineTuner.hpp"
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 // Generate synthetic commanded trajectory (square path)
 std::vector<TrajectorySample> generateCommandedSquare(double sideLength, double velocity, double dt) {
@@ -164,10 +164,10 @@ void printErrorStatistics(const ErrorStatistics& stats, const std::string& label
 }
 
 int main() {
-    std::cout << "=== Motion Replanner: Trajectory Analysis Example ===\n\n";
+    std::cout << "=== LiveTune: Trajectory Analysis Example ===\n\n";
     
-    // Configure replanner
-    ReplannerConfig config;
+    // Configure livetune
+    OnlineTunerConfig config;
     config.systemDelay = 0.001;  // 1ms delay
     config.samplePeriod = 0.001; // 1kHz sample rate
     config.cornerVelocityThreshold = 0.1;
@@ -175,7 +175,7 @@ int main() {
     config.errorThreshold = 0.1;
     config.mode = OperationMode::Monitor;
     
-    MotionReplanner replanner(config);
+    OnlineTuner livetune(config);
     
     // Generate test trajectories
     double sideLength = 100.0;  // 100mm square
@@ -210,23 +210,23 @@ int main() {
             commanded, scenario.delay, scenario.overshoot, scenario.noise, dt
         );
         
-        // Reset replanner
-        replanner.reset();
+        // Reset livetune
+        livetune.reset();
         
         // Feed samples
         for (size_t i = 0; i < commanded.size(); ++i) {
-            replanner.processSample(commanded[i], actual[i]);
+            livetune.processSample(commanded[i], actual[i]);
         }
         
         // Get statistics
-        auto globalStats = replanner.getGlobalStatistics();
-        auto cornerStats = replanner.getCornerStatistics();
+        auto globalStats = livetune.getGlobalStatistics();
+        auto cornerStats = livetune.getCornerStatistics();
         
         printErrorStatistics(globalStats, "Global Error Statistics");
         printErrorStatistics(cornerStats, "Corner Error Statistics");
         
         // Check for limit violations
-        auto violations = replanner.getLimitViolations();
+        auto violations = livetune.getLimitViolations();
         if (!violations.empty()) {
             std::cout << "\n  Limit violations detected: " << violations.size() << "\n";
         }

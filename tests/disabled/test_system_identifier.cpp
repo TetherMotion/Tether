@@ -8,7 +8,7 @@
 #include <cmath>
 #include <random>
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 class SystemIdentifierTest : public ::testing::Test {
 protected:

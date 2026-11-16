@@ -78,9 +78,9 @@ component_management:
       name: tether_motion_planner
       paths:
         - src/motion_planner/**
-        - src/replanner/**
+        - src/livetune/**
         - include/tether/motion_planner/**
-        - include/tether/motion_replanner/**
+        - include/tether/livetune/**
     - component_id: tether_control
       name: tether_control
       paths:

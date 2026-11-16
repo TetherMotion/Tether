@@ -13,7 +13,7 @@
 #include <cmath>
 #include <random>
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 // Generate grid test data covering workspace
 std::vector<PerformanceMetrics> generateWorkspaceData(
@@ -126,7 +126,7 @@ void printHeatmap2DSummary(const Heatmap2D& heatmap) {
 }
 
 int main() {
-    std::cout << "=== Motion Replanner: Heatmap Generation Example ===\n\n";
+    std::cout << "=== LiveTune: Heatmap Generation Example ===\n\n";
     
     std::mt19937 rng(42);  // Reproducible results
     

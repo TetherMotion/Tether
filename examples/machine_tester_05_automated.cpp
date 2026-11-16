@@ -19,7 +19,7 @@
 #include "PerformanceHeatmap.hpp"
 #include "TestDataExporter.hpp"
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 class AutomatedTestSuite {
 public:

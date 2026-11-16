@@ -16,7 +16,7 @@
 #include "PerformanceHeatmap.hpp"
 #include "TestDataExporter.hpp"
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 struct TestCase {
     std::string name;

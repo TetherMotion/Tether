@@ -1,24 +1,24 @@
 /**
  * @file motion_planner_bindings.cpp
- * @brief Python bindings for Motion Replanner, Machine Tester, etc.
+ * @brief Python bindings for LiveTune, Machine Tester, etc.
  */
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
 
-#include "tether/motion_replanner/MotionReplanner.hpp"
-#include "tether/motion_replanner/MachineTester.hpp"
-#include "tether/motion_replanner/SystemIdentifier.hpp"
-#include "tether/motion_replanner/PerformanceHeatmap.hpp"
-#include "tether/motion_replanner/GCodeGenerator.hpp"
-#include "tether/motion_replanner/TestDataExporter.hpp"
+#include "tether/livetune/OnlineTuner.hpp"
+#include "tether/livetune/MachineTester.hpp"
+#include "tether/livetune/SystemIdentifier.hpp"
+#include "tether/livetune/PerformanceHeatmap.hpp"
+#include "tether/livetune/GCodeGenerator.hpp"
+#include "tether/livetune/TestDataExporter.hpp"
 
 namespace py = pybind11;
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 PYBIND11_MODULE(_motion_planner, m) {
-    m.doc() = "Python bindings for Motion Replanner and Machine Testing";
+    m.doc() = "Python bindings for LiveTune and Machine Testing";
 
     // ==== Enums ====
     py::enum_<SingleAxisTestType>(m, "SingleAxisTestType")

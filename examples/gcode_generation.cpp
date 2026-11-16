@@ -12,7 +12,7 @@
 #include <iomanip>
 #include <fstream>
 
-using namespace MotionReplanner;
+using namespace LiveTune;
 
 void saveGCode(const GCodeProgram& program, const std::string& filename) {
     GCodeExporter exporter;
@@ -28,7 +28,7 @@ void saveGCode(const GCodeProgram& program, const std::string& filename) {
 }
 
 int main() {
-    std::cout << "=== Motion Replanner: G-Code Generation Example ===\n\n";
+    std::cout << "=== LiveTune: G-Code Generation Example ===\n\n";
     
     // Default options
     GCodeOptions options;

@@ -78,7 +78,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/control)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/destabilizer)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/export)
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/replanner)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/livetune)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/motion_planner)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/io)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/identification)
@@ -101,7 +101,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/livetune
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
@@ -142,7 +142,7 @@ function(create_module_test_timeout MODULE_NAME SOURCES LIBS DEFINITIONS TEST_TI
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/livetune
         ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
@@ -352,39 +352,39 @@ set(MOTION_PLANNER_ANALYTICAL_EXTRUSION_SOURCES
 )
 # NOTE: MotionPlannerIntegrationTest.cpp removed — it tested the old
 # PiecewiseBezierPath/PathBuilder/CornerAnalyzer stack.
-# Motion replanner test sources split by sub-area
-set(MOTION_REPLANNER_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common;tether_identification")
-set(MOTION_REPLANNER_CORE_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MotionReplanner_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_TrajectorySampleConverter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedContourError.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedCornerDetection.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CurvatureAwareLimiter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedSuggestionSolver.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_OnlineReblender.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_ProfileReplanner.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_CertifiedReplannerHeader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathEvaluator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathRelativeFFT.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_KdeDerivativeAnalyzer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_kde_coverage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_dependence_analyzer.cpp"
+# Motion livetune test sources split by sub-area
+set(LIVETUNE_LIBS "tether_common;tether_motion_control;tether_motion_planner;tether_ethercat_common;tether_identification")
+set(LIVETUNE_CORE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_OnlineTuner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_OnlineTuner_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_TrajectorySampleConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_CertifiedContourError.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_CertifiedCornerDetection.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_CurvatureAwareLimiter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_CertifiedSuggestionSolver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_OnlineReblender.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_ProfileReplanner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_CertifiedLiveTuneHeader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_PathEvaluator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_PathRelativeFFT.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_KdeDerivativeAnalyzer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_kde_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_dependence_analyzer.cpp"
 )
-set(MOTION_REPLANNER_MACHINE_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MachineTester.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_MachineTesterTrajectories.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_GCodeGenerator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_GCodePatterns_coverage.cpp"
+set(LIVETUNE_MACHINE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_MachineTester.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_MachineTesterTrajectories.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_GCodeGenerator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_GCodePatterns_coverage.cpp"
 )
-set(MOTION_REPLANNER_IDENTIFICATION_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_SystemIdentifier.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_SystemIdentifierAnalysis.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_ModelIdentificationAdvanced.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PerformanceHeatmap.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_TestDataExporter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_SvgExporter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_KdeSvgRenderer.cpp"
+set(LIVETUNE_IDENTIFICATION_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_SystemIdentifier.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_SystemIdentifierAnalysis.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_ModelIdentificationAdvanced.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_PerformanceHeatmap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_TestDataExporter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_SvgExporter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/livetune/test_KdeSvgRenderer.cpp"
 )
 # Simulation test sources split by sub-area
 set(SIMULATION_SYSTEMS_SOURCES
@@ -417,7 +417,12 @@ set(SLAVE_EMULATION_PROFILES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_watchdog_sii.cpp"
 )
 file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
-file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
+file(GLOB_RECURSE LIVETUNE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/livetune/*.cpp")
+# livetune tests are split into explicit sub-area binaries above; keep the
+# catch-all for any stray files not on those lists so nothing is compiled
+# (or linked) twice.
+list(REMOVE_ITEM LIVETUNE_TEST_SOURCES
+    ${LIVETUNE_CORE_SOURCES} ${LIVETUNE_MACHINE_SOURCES} ${LIVETUNE_IDENTIFICATION_SOURCES})
 file(GLOB_RECURSE PLATFORM_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp")
 # Deadline-timer tests measure real time — under `ctest -jN` CPU contention
 # they flake.  They are built as tether_platform_serial_tests (RUN_SERIAL)
@@ -676,7 +681,7 @@ target_include_directories(tether_motion_geometry_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/livetune
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
@@ -726,7 +731,7 @@ target_include_directories(tether_motion_blend_new_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/livetune
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
@@ -769,7 +774,7 @@ target_include_directories(tether_motion_planner_renurbs_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/export
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_replanner
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/livetune
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether/motion_planner
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
@@ -792,9 +797,9 @@ gtest_discover_tests(tether_motion_planner_renurbs_tests
     PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120}
 )
 
-create_module_test(motion_replanner_core "${MOTION_REPLANNER_CORE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")
-create_module_test(motion_replanner_machine "${MOTION_REPLANNER_MACHINE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")
-create_module_test(motion_replanner_identification "${MOTION_REPLANNER_IDENTIFICATION_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")
+create_module_test(livetune_core "${LIVETUNE_CORE_SOURCES}" "${LIVETUNE_LIBS}" "")
+create_module_test(livetune_machine "${LIVETUNE_MACHINE_SOURCES}" "${LIVETUNE_LIBS}" "")
+create_module_test(livetune_identification "${LIVETUNE_IDENTIFICATION_SOURCES}" "${LIVETUNE_LIBS}" "")
 
 if(CIA301_TEST_SOURCES)
     create_module_test(profiles_cia301
@@ -931,10 +936,10 @@ if(EXPORT_TEST_SOURCES)
     )
 endif()
 
-if(REPLANNER_TEST_SOURCES)
-    create_module_test(replanner
-        "${REPLANNER_TEST_SOURCES}"
-        "tether_common;tether_motion_planner"
+if(LIVETUNE_TEST_SOURCES)
+    create_module_test(livetune
+        "${LIVETUNE_TEST_SOURCES}"
+        "${LIVETUNE_LIBS}"
         ""
     )
 endif()

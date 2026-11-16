@@ -1,10 +1,10 @@
 """
 Tether Motion Planner Module
 
-Motion planning, replanning, and machine testing utilities.
+Motion planning, feedback tuning, and machine testing utilities.
 
 Classes:
-    MotionReplanner: Dynamic motion replanning
+    OnlineTuner: Feedback analysis and parameter tuning
     MachineTester: Machine performance testing
     SystemIdentifier: System identification utilities
     PerformanceHeatmap: Generate performance heatmaps
