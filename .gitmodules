@@ -28,3 +28,6 @@
 [submodule "dependencies/VolcanoPlot"]
 	path = dependencies/VolcanoPlot
 	url = https://github.com/ulikoehler/VolcanoPlot.git
+[submodule "dependencies/glyb"]
+	path = dependencies/glyb
+	url = https://github.com/ulikoehler/glyb.git

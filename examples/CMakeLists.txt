@@ -684,4 +684,90 @@ else()
     message(STATUS "tether_terminal_ui unavailable; skipping oven_gradient_tui")
 endif()
 
+# --- HMI scene native renderer (Vulkan) + glyb font metrics ---
+# Renders the shared TetherWebUI HMI scene IR (TetherWebUI/src/hmi/
+# scene.ts: rect/line/path/text ops) to an offscreen image (PPM), so
+# native widgets produce views identical to the web SVG backend.
+# Text uses glyb — the same glyph engine as VolcanoPlot (FreeType
+# rasterization + HarfBuzz shaping into a grayscale atlas). Optional:
+# silently skipped when the system deps are absent.
+find_package(PkgConfig QUIET)
+find_package(Threads QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(HMI_FT   QUIET freetype2)
+    pkg_check_modules(HMI_HB   QUIET harfbuzz)
+    pkg_check_modules(HMI_PNG  QUIET libpng)
+    pkg_check_modules(HMI_VK   QUIET vulkan)
+    pkg_check_modules(HMI_SHDC QUIET shaderc)
+endif()
+set(GLYB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/glyb")
+if(HMI_FT_FOUND AND HMI_HB_FOUND AND HMI_PNG_FOUND AND Threads_FOUND
+   AND EXISTS "${GLYB_DIR}/src/font.cc")
+    add_library(tether_glyb_hmi STATIC
+        ${GLYB_DIR}/src/binpack.cc
+        ${GLYB_DIR}/src/file.cc
+        ${GLYB_DIR}/src/font.cc
+        ${GLYB_DIR}/src/glyph.cc
+        ${GLYB_DIR}/src/image.cc
+        ${GLYB_DIR}/src/logger.cc
+        ${GLYB_DIR}/src/utf8.cc
+        hmi_msdf_stub.cpp)
+    target_include_directories(tether_glyb_hmi PUBLIC
+        ${GLYB_DIR}/src
+        ${GLYB_DIR}/third_party/glm
+        ${GLYB_DIR}/third_party/msdfgen
+        ${HMI_FT_INCLUDE_DIRS} ${HMI_HB_INCLUDE_DIRS} ${HMI_PNG_INCLUDE_DIRS})
+    target_link_libraries(tether_glyb_hmi PUBLIC
+        ${HMI_FT_LIBRARIES} ${HMI_HB_LIBRARIES} ${HMI_PNG_LIBRARIES}
+        Threads::Threads)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(tether_glyb_hmi PRIVATE -w)
+    endif()
+
+    # glyb/HarfBuzz advance metrics → TypeScript module consumed by
+    # TetherWebUI's scene→SVG text layout (identical positioning).
+    add_executable(hmi_font_metrics hmi_font_metrics.cpp)
+    list(APPEND TETHER_EXAMPLE_TARGETS hmi_font_metrics)
+    target_link_libraries(hmi_font_metrics PRIVATE tether_glyb_hmi)
+
+    # Shared scene model + Vulkan backend (used by hmi_vulkan CLI and
+    # the hmi_remote TCP/IP client).
+    set(HMI_COMMON_SRC
+        ${CMAKE_CURRENT_SOURCE_DIR}/common/HmiVulkan.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/common/HmiAuto.cpp)
+
+    if(HMI_VK_FOUND AND HMI_SHDC_FOUND)
+        add_executable(hmi_vulkan hmi_vulkan.cpp ${HMI_COMMON_SRC})
+        list(APPEND TETHER_EXAMPLE_TARGETS hmi_vulkan)
+        target_link_libraries(hmi_vulkan PRIVATE
+            tether_glyb_hmi ${HMI_VK_LIBRARIES} ${HMI_SHDC_LIBRARIES}
+            Threads::Threads)
+        target_include_directories(hmi_vulkan PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS})
+
+        # Remote HMI: TetherIOClient over TCP → plc.* catalog →
+        # auto/authored screen → shared scene builders → Vulkan.
+        if(TARGET tether_io_protocol)
+            add_executable(hmi_remote hmi_remote.cpp ${HMI_COMMON_SRC})
+            list(APPEND TETHER_EXAMPLE_TARGETS hmi_remote)
+            target_link_libraries(hmi_remote PRIVATE
+                tether_glyb_hmi ${HMI_VK_LIBRARIES} ${HMI_SHDC_LIBRARIES}
+                tether_io_protocol tether_common Threads::Threads)
+            target_include_directories(hmi_remote PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}
+                ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS})
+        else()
+            message(STATUS "tether_io_protocol not built; "
+                           "skipping hmi_remote")
+        endif()
+    else()
+        message(STATUS "vulkan/shaderc not found; skipping hmi_vulkan "
+                       "and hmi_remote")
+    endif()
+else()
+    message(STATUS "freetype2/harfbuzz/libpng not found; "
+                   "skipping HMI glyb targets")
+endif()
+
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})
