@@ -1051,10 +1051,6 @@ endif()
 if(TETHER_BUILD_IO_CLIENT AND TETHER_BUILD_IO_PROTOCOL)
     add_subdirectory(tools/tether_io_client)
 endif()
-if(TARGET tether_terminal_ui)
-    add_subdirectory(tools/tether_chat)
-    add_subdirectory(tools/tether_monitor)
-endif()
 
 
 # =============================================================================

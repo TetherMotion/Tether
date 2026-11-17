@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "tether/terminal_ui/AnsiLine.hpp"  // utf8Cols
+#include "tether/terminal_ui/Session.hpp"   // Palette pair slots
+#include <logging/Logger.hpp>               // Platform::LogLevel
 
 namespace Tether {
 namespace TUI {
@@ -145,6 +147,23 @@ inline int spansWidth(std::span<const Span> spans) {
     int w = 0;
     for (const auto& s : spans) w += static_cast<int>(utf8Cols(s.text));
     return w;
+}
+
+
+/**
+ * Palette pair slot for a Platform::LogLevel — the standard mapping for
+ * transcript/log rendering: Error->PalError, Warn->PalHint,
+ * Debug/Verbose->PalMuted, anything else->PalNone.  Pass the result to
+ * pairAttrs()/COLOR_PAIR() — it is a pair number, not an attr.
+ */
+inline short logLevelPair(Platform::LogLevel level) {
+    switch (level) {
+        case Platform::LogLevel::Error:   return PalError;
+        case Platform::LogLevel::Warn:    return PalHint;
+        case Platform::LogLevel::Debug:
+        case Platform::LogLevel::Verbose: return PalMuted;
+        default:                          return PalNone;
+    }
 }
 
 } // namespace TUI
