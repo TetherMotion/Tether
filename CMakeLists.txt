@@ -1053,6 +1053,7 @@ if(TETHER_BUILD_IO_CLIENT AND TETHER_BUILD_IO_PROTOCOL)
 endif()
 if(TARGET tether_terminal_ui)
     add_subdirectory(tools/kicodegen_chat)
+    add_subdirectory(tools/kicodegen_monitor)
 endif()
 
 
