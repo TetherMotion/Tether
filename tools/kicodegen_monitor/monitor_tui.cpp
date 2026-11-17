@@ -108,6 +108,8 @@ int main(int argc, char** argv) {
     AgentState st;
     std::string input;
     bool awaiting = false;        // an ASK frame wants an ANSWER
+    std::vector<std::string> ask_opts;  // ASK options — arrow-key select
+    int ask_sel = 0;
     uint64_t tick = 0;
 
     auto push = [&](const std::string& t, LogLevel l) {
@@ -189,9 +191,11 @@ int main(int argc, char** argv) {
                     auto v = splitLines(p);
                     flush_content();
                     if (!v.empty()) push("? " + v[0], LogLevel::Warn);
-                    for (size_t i = 1; i < v.size(); ++i)
-                        push("    " + std::to_string(i) + ". " + v[i],
-                             LogLevel::Info);
+                    ask_opts.assign(v.begin() + 1, v.end());
+                    ask_sel = 0;
+                    for (size_t i = 0; i < ask_opts.size(); ++i)
+                        push("    " + std::to_string(i + 1) + ". " +
+                             ask_opts[i], LogLevel::Info);
                     awaiting = true;
                     input.clear();
                     st.busy = false;
@@ -292,12 +296,24 @@ int main(int argc, char** argv) {
                     attron(A_BOLD);
                     mvprintw(y, 0, "answer>");
                     attroff(A_BOLD);
-                    std::string view = input;
-                    int maxw = COLS - 10;
-                    if (int(view.size()) > maxw)
-                        view = "…" + view.substr(view.size() - size_t(maxw - 1));
-                    mvprintw(y, 8, "%s", view.c_str());
-                    move(y, 8 + int(view.size()));
+                    if (input.empty() && !ask_opts.empty()) {
+                        // Selector mode: ‹ N. option › — ↑/↓ cycles.
+                        std::string view = "‹ " +
+                            std::to_string(ask_sel + 1) + ". " +
+                            ask_opts[size_t(ask_sel)] + " ›";
+                        attron(A_REVERSE);
+                        mvprintw(y, 9, "%s", view.c_str());
+                        attroff(A_REVERSE);
+                        mvprintw(y, 11 + int(view.size()),
+                                 "(↑/↓ pick · Enter · type = custom)");
+                    } else {
+                        std::string view = input;
+                        int maxw = COLS - 10;
+                        if (int(view.size()) > maxw)
+                            view = "…" + view.substr(view.size() - size_t(maxw - 1));
+                        mvprintw(y, 9, "%s", view.c_str());
+                        move(y, 9 + int(view.size()));
+                    }
                 } else {
                     attron(COLOR_PAIR(8));
                     mvprintw(y, 1, "PgUp/PgDn: scroll   q: quit");
@@ -310,12 +326,32 @@ int main(int argc, char** argv) {
             switch (ch) {
                 case '\n': case '\r': case KEY_ENTER:
                     if (awaiting) {
-                        push("answer> " + input, LogLevel::Warn);
-                        child.sendFrame("ANSWER", input);
+                        std::string ans = input;
+                        if (ans.empty() && !ask_opts.empty())
+                            ans = std::to_string(ask_sel + 1);
+                        push("answer> " +
+                             (input.empty() && !ask_opts.empty()
+                                  ? ask_opts[size_t(ask_sel)] : ans),
+                             LogLevel::Warn);
+                        child.sendFrame("ANSWER", ans);
                         input.clear();
+                        ask_opts.clear();
                         awaiting = false;
                     }
                     return true;
+                case KEY_UP:
+                    if (awaiting && input.empty() && !ask_opts.empty()) {
+                        ask_sel = (ask_sel + int(ask_opts.size()) - 1) %
+                                  int(ask_opts.size());
+                        return true;
+                    }
+                    return false;
+                case KEY_DOWN:
+                    if (awaiting && input.empty() && !ask_opts.empty()) {
+                        ask_sel = (ask_sel + 1) % int(ask_opts.size());
+                        return true;
+                    }
+                    return false;
                 case KEY_BACKSPACE: case 127: case 8:
                     if (!input.empty()) input.pop_back();
                     return true;
