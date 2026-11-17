@@ -240,6 +240,60 @@ public:
         return false;
     }
 
+    /**
+     * @brief Position-only IK (3-DOF task on an N-DOF chain).
+     *
+     * DLS on the translational rows of the analytic Jacobian plus a
+     * nullspace posture pull toward `posture` (empty = mid-range of the
+     * supplied `center`, or zeros). The nullspace term both regularizes
+     * redundant chains and resolves the extra DOF deterministically.
+     * Warm-start via q (in/out).
+     */
+    bool positionIK(const Eigen::Vector3d& target, Eigen::VectorXd& q,
+                    const IKOptions& opt, double* residual = nullptr,
+                    const Eigen::VectorXd& posture = Eigen::VectorXd(),
+                    double postureGain = 0.2) const {
+        const size_t n = dof();
+        Eigen::VectorXd pref =
+            posture.size() == (Eigen::Index)n ? posture
+                                              : Eigen::VectorXd::Zero(n);
+        for (int it = 0; it < opt.maxIter; ++it) {
+            const Eigen::Isometry3d cur = forwardKinematics(q);
+            const Eigen::Vector3d e =
+                target - cur.translation();
+            if (e.norm() < opt.tolPos) {
+                if (residual) *residual = e.norm();
+                return true;
+            }
+            // Adaptive damping: shrink λ with the residual so the
+            // DLS floor (≈λ²) doesn't sit just above tolPos.
+            const double lam =
+                opt.lambda * std::clamp(e.norm(), 1e-4, 1.0);
+            const Eigen::MatrixXd Jp = jacobian(q).topRows(3);
+            // DLS pseudoinverse of the 3×n position Jacobian
+            const Eigen::Matrix3d JJt =
+                Jp * Jp.transpose() +
+                lam * lam * Eigen::Matrix3d::Identity();
+            const Eigen::MatrixXd Jpinv =
+                Jp.transpose() * JJt.ldlt()
+                                     .solve(Eigen::Matrix3d::Identity());
+            const Eigen::MatrixXd N =
+                Eigen::MatrixXd::Identity(n, n) - Jpinv * Jp;
+            Eigen::VectorXd dq =
+                Jpinv * e + postureGain * N * (pref - q);
+            const double step = dq.cwiseAbs().maxCoeff();
+            if (step > opt.maxStep) dq *= opt.maxStep / step;
+            q += dq;
+            for (Eigen::Index i = 0; i < q.size(); ++i)
+                if (m_links[i].type == JointType::kRevolute)
+                    q[i] = std::remainder(q[i], 2.0 * M_PI);
+        }
+        if (residual)
+            *residual = (forwardKinematics(q).translation() - target)
+                            .norm();
+        return false;
+    }
+
     // ------------------------------------------------------------------
     // Spherical-wrist analytic IK (6-DOF, axes 2∥3, axes 4/5/6 concurrent)
     // ------------------------------------------------------------------

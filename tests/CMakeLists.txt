@@ -1666,6 +1666,23 @@ else()
                    "integration test skipped")
 endif()
 
+# Joint-path optimizer tests — no external oracle needed (structural
+# checks: FK residuals, anisotropy direction, unreachable flags,
+# Pareto dominance), so this target is unconditional.
+tether_add_test_executable(tether_kinematics_optimizer_tests
+    kinematics/test_joint_path_optimizer.cpp
+)
+target_include_directories(tether_kinematics_optimizer_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(tether_kinematics_optimizer_tests PRIVATE
+    tether_kinematics
+    GTest::gtest_main
+)
+gtest_discover_tests(tether_kinematics_optimizer_tests
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120})
+
 # Build all configured test executables with `make tests` (or `ninja tests` / `cmake --build . --target tests`)
 get_property(TETHER_ALL_TEST_TARGETS GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS)
 add_custom_target(tests DEPENDS ${TETHER_ALL_TEST_TARGETS})
