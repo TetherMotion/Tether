@@ -23,6 +23,7 @@ swap them without touching the call site.
 | Actuator has hard on/off behaviour | `BangBangController` | Hysteresis-based switching |
 | Plant is unstable or highly nonlinear | `SlidingModeController` family | Robust to matched disturbances |
 | You have a state-space model | `LQRController` / `LQGController` / `LQIController` | Optimal state feedback, optional observer + integral action |
+| Torque-mode servo axis, physical params | `ServoAxisLQIBackend` | LQI + [θ,ω,τ_d] observer + disturbance FF — see `ServoAxisLQI.md` |
 | Multiple loops must act on one output | `ParallelController` | Sums several controller outputs |
 | Repetitive task (same path every cycle) | `RepetitiveController` / ILC family | Learns the repeating error |
 

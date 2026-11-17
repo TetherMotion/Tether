@@ -181,6 +181,7 @@ set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_classical_tuning_factory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_setpoint_conditioner.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_loop_pacer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_servo_axis_lqi_backend.cpp"
 )
 set(CONTROL_EXTRUSION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_power_law_rheology.cpp"

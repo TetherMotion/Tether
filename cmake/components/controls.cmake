@@ -29,6 +29,8 @@ set(TETHER_CONTROLS_SOURCES
     # Pressure-advance calibration + flow-rate analysis
     ${TETHER_ROOT}/src/control/extrusion/PressureAdvanceCalibrator.cpp
     ${TETHER_ROOT}/src/control/extrusion/FlowRateAnalyzer.cpp
+    # Torque-mode servo axis (LQI + disturbance observer, physical params)
+    ${TETHER_ROOT}/src/control/motion/ServoAxisLQIBackend.cpp
     # Generic oven thermal control (physical-parameter profile tracking)
     ${TETHER_ROOT}/src/control/thermal/OvenThermalModel.cpp
     ${TETHER_ROOT}/src/control/thermal/OvenSOPDTModel.cpp

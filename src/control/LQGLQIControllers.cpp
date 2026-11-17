@@ -303,11 +303,30 @@ ControllerOutput LQIController::computeImpl(const ControllerInput& input) {
     output.control = std::clamp(u[0], m_limits.outputMin, m_limits.outputMax);
     output.error = input.reference - y[0];
     output.integral = m_xi[0];
-    
+
+    // Back-calculation anti-windup: pull xi toward the value consistent
+    // with the saturated output. Since u = -Kx·x - Ki·xi, the integral
+    // state's contribution is u_xi = -Ki·xi, hence
+    //   xi += -(u_sat - u_desat)·dt / (Ki_ii·Tt).
+    // The residual vanishes when unsaturated, so no gating is needed.
+    if (m_backCalcTt > 0.0 && dt > 0.0) {
+        for (int i = 0; i < m_p && i < m_m; ++i) {
+            const double uSat =
+                std::clamp(u[i], m_limits.outputMin, m_limits.outputMax);
+            const double residual = uSat - u[i];
+            const double ki = m_Ki[i * m_p + i];
+            if (residual != 0.0 && std::abs(ki) > 1e-12) {
+                m_xi[i] -= residual * dt / (ki * m_backCalcTt);
+                m_xi[i] =
+                    std::clamp(m_xi[i], m_integralMin, m_integralMax);
+            }
+        }
+    }
+
     for (int i = 0; i < m_m; i++) {
         output.controlVector[i] = u[i];
     }
-    
+
     return output;
 }
 

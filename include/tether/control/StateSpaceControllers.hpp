@@ -608,7 +608,22 @@ public:
      *             must be ≥ `min`.
      */
     void setIntegralLimits(double min, double max);
-    
+
+    /**
+     * @brief Back-calculation (tracking) anti-windup time constant [s].
+     *
+     * When `Tt > 0`, each cycle the integral state is pulled toward the
+     * value consistent with the saturated output:
+     *   `xi += -(u_sat - u_desat)·dt / (Ki_ii·Tt)`
+     * (the sign accounts for `u = -Kx·x - Ki·xi`, so `du/dxi = -Ki`).
+     * The residual is zero when unsaturated, so the correction is
+     * inactive outside saturation. For `m_p > 1` the diagonal `Ki_ii`
+     * is used (decoupled approximation). `Tt <= 0` disables the
+     * mechanism (default). Rule of thumb: `Tt` ≈ 1/bandwidth.
+     */
+    void setBackCalculationTime(double Tt) { m_backCalcTt = Tt; }
+    double backCalculationTime() const { return m_backCalcTt; }
+
     /**
      * @brief Copy the state-feedback part of the LQI gain into `Kx`.
      *
@@ -676,6 +691,7 @@ private:
     std::array<double, MAX_OUTPUT_DIM> m_xi{};
     double m_integralMin{-1e6};
     double m_integralMax{1e6};
+    double m_backCalcTt{0.0}; /**< Back-calculation time [s]; <=0 off */
     
     bool m_designed{false};
     bool m_discreteDesign{false};
