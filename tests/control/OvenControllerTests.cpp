@@ -67,12 +67,17 @@ struct SimResult {
 
 // Run the closed loop. `plantParamsOverride` sets the TRUE plant;
 // controller gets `ctrlCfg`. noiseSigma [°C], disturbanceFn(t) -> °C/s.
+// `sensorFn`, when set, replaces the degree-C Gaussian path: it maps the
+// true plant temperature to the measured temperature (e.g. voltage-domain
+// noise through a nonlinear sensor inverse).
 SimResult simulate(OvenModelParams plantP,
                    const OvenControllerConfig& ctrlCfg,
                    const TemperatureProfile& profile,
                    double duration, double dt = 0.5,
                    double noiseSigma = 0.0,
-                   const std::function<double(double)>& disturbanceFn = {}) {
+                   const std::function<double(double)>& disturbanceFn = {},
+                   const std::function<double(double, std::mt19937&)>& sensorFn
+                       = {}) {
     OvenThermalModel plant(plantP);
     plant.setParams(plantP);
     plant.reset();
@@ -90,7 +95,9 @@ SimResult simulate(OvenModelParams plantP,
 
     for (double t = 0.0; t < duration; t += dt) {
         if (disturbanceFn) plant.params().disturbance = disturbanceFn(t);
-        in.measured = plant.temperature() + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+        const double trueT = plant.temperature();
+        in.measured = sensorFn ? sensorFn(trueT, rng)
+                               : trueT + (noiseSigma > 0.0 ? noise(rng) : 0.0);
         const ControllerOutput out = ctrl.compute(in);
         plant.step(out.control, dt);
 
@@ -125,6 +132,87 @@ double maxErrIn(const SimResult& r, double t0, double t1) {
         if (s.t >= t0 && s.t <= t1) m = std::max(m, std::abs(s.temp - s.ref));
     return m;
 }
+
+// ---------------------------------------------------------------------------
+// Voltage-domain sensor noise models
+// ---------------------------------------------------------------------------
+// Real oven sensors do not emit temperature directly: a thermocouple produces
+// a small EMF (mV) and a thermistor a divider voltage (V). ADC/front-end noise
+// is Gaussian in that VOLTAGE domain, and the firmware maps voltage back to
+// temperature through a nonlinear inverse equation. Because the inverse is
+// curved, the temperature-domain noise is skewed and its gain varies with
+// operating point — not the symmetric Gaussian noise used elsewhere in these
+// tests. These models reproduce that chain: true T -> voltage -> +N(0,sigmaV)
+// -> inverse -> measured T.
+
+// Type-K thermocouple (NiCr-NiAl). NIST ITS-90 reference function E(T) [mV]
+// for 0..1372 C plus the standard approximate inverse T(E) [degC] for
+// 0..500 C. Cold junction compensated -> cancels, so only the measurement
+// junction EMF matters. Type K is nearly linear in the oven range
+// (Seebeck ~40 uV/C), so the induced skew is small — kept for contrast.
+struct TypeKThermocouple {
+    double sigmaV{0.010};   // ADC noise on EMF, [mV]
+
+    // Forward: temperature -> EMF [mV].
+    static double emf(double T) {
+        static const double c[10] = {
+            -0.0176004136860, 0.0389212049750, 0.00001855587700320,
+            -9.9457592874e-8, 3.1840945719e-10, -5.6072844889e-13,
+            5.6075059059e-16, -3.2020720003e-19, 9.7151147152e-23,
+            -1.2104721275e-26};
+        double p = 0.0, tp = 1.0;
+        for (double ci : c) { p += ci * tp; tp *= T; }
+        const double d = T - 126.9686;
+        return p + 0.1185976 * std::exp(-0.0001183432 * d * d);
+    }
+
+    // Inverse: EMF -> temperature [degC] (NIST 0..500 C polynomial).
+    static double temp(double E) {
+        static const double d[10] = {
+            0.0, 25.08355, 7.860106e-2, -2.503131e-1, 8.315270e-2,
+            -1.228034e-2, 9.804036e-4, -4.413030e-5, 1.057734e-6,
+            -1.052755e-8};
+        double p = 0.0, ep = 1.0;
+        for (double di : d) { p += di * ep; ep *= E; }
+        return p;
+    }
+
+    double measure(double T, std::mt19937& rng) const {
+        std::normal_distribution<double> n(0.0, sigmaV);
+        return temp(emf(T) + n(rng));
+    }
+};
+
+// NTC thermistor (beta-parameter model) in a resistor divider.
+//   VCC -- NTC -- sense node -- Rf -- GND ;  V_node = VCC*Rf/(Rntc+Rf)
+// Voltage rises with temperature (Rntc falls). Inverse: Rntc=Rf*(VCC-V)/V.
+// Rf is chosen so the divider stays well inside the ADC rails over the oven
+// range; a poorly chosen Rf pushes the sense voltage toward a rail where the
+// temperature gain explodes. sigmaV is ADC noise in volts.
+struct NtcThermistor {
+    double R0{100e3};     // nominal resistance at T0 [ohm]
+    double T0{298.15};    // reference temperature [K]
+    double B{3950.0};     // beta constant [K]
+    double Rf{4.7e3};     // divider fixed resistor [ohm]
+    double VCC{3.3};      // supply / ADC full scale [V]
+    double sigmaV{0.003}; // ADC noise [V]  (~0.2-0.5 C in the oven range)
+
+    double resistance(double T) const {   // T in degC
+        return R0 * std::exp(B * (1.0 / (T + 273.15) - 1.0 / T0));
+    }
+    double voltage(double T) const {
+        return VCC * Rf / (resistance(T) + Rf);
+    }
+    double tempFromVoltage(double V) const {
+        V = std::clamp(V, 1e-4, VCC - 1e-4);   // rail / domain guard
+        const double r = Rf * (VCC - V) / V;
+        return 1.0 / (1.0 / T0 + std::log(r / R0) / B) - 273.15;
+    }
+    double measure(double T, std::mt19937& rng) const {
+        std::normal_distribution<double> n(0.0, sigmaV);
+        return tempFromVoltage(voltage(T) + n(rng));
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Two-state coupled plant (non-collocated sensing): the sensor measures
@@ -940,7 +1028,9 @@ SimResult simulateSopdt(OvenModelParamsSOPDT plantP,
                         const TemperatureProfile& profile,
                         double duration, double dt = 0.5,
                         double noiseSigma = 0.0,
-                        const std::function<double(double)>& disturbanceFn = {}) {
+                        const std::function<double(double)>& disturbanceFn = {},
+                        const std::function<double(double, std::mt19937&)>& sensorFn
+                            = {}) {
     OvenThermalModelSOPDT plant(plantP);
     plant.reset();
 
@@ -957,7 +1047,9 @@ SimResult simulateSopdt(OvenModelParamsSOPDT plantP,
 
     for (double t = 0.0; t < duration; t += dt) {
         if (disturbanceFn) plant.params().disturbance = disturbanceFn(t);
-        in.measured = plant.temperature() + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+        const double trueT = plant.temperature();
+        in.measured = sensorFn ? sensorFn(trueT, rng)
+                               : trueT + (noiseSigma > 0.0 ? noise(rng) : 0.0);
         const ControllerOutput out = ctrl.compute(in);
         plant.step(out.control, dt);
 
@@ -1045,4 +1137,232 @@ TEST(OvenControllerTest, SopdtStatusReportsMethods) {
     EXPECT_EQ(st.ffMethod, OvenFeedforwardMethod::DominantLag);
     EXPECT_EQ(st.estimateMethod, OvenEstimateMethod::SopdtOe);
     EXPECT_EQ(st.tuneMethod, OvenTuneMethod::ImcPi);
+}
+
+
+// ---------------------------------------------------------------------------
+// Voltage-domain sensor noise -> nonlinear temperature-domain noise
+// ---------------------------------------------------------------------------
+
+// mean / stddev / Fisher-Pearson skewness of a residual sample.
+struct NoiseStats {
+    double mean{0.0}, stddev{0.0}, skew{0.0};
+    int n{0};
+};
+NoiseStats noiseStats(const std::vector<double>& resid) {
+    NoiseStats st;
+    st.n = static_cast<int>(resid.size());
+    if (st.n == 0) return st;
+    double m = 0.0;
+    for (double v : resid) m += v;
+    m /= st.n;
+    st.mean = m;
+    double v2 = 0.0, v3 = 0.0;
+    for (double x : resid) {
+        const double d = x - m;
+        v2 += d * d;
+        v3 += d * d * d;
+    }
+    const double sd = std::sqrt(v2 / st.n);
+    st.stddev = sd;
+    st.skew = sd > 0.0 ? (v3 / st.n) / (sd * sd * sd) : 0.0;
+    return st;
+}
+
+// Collect measurement residuals (measured - true) at a fixed true
+// temperature through a sensor model's measure().
+template <typename Sensor>
+NoiseStats sensorNoiseAt(const Sensor& sensor, double trueT, int nSamples,
+                         std::mt19937& rng) {
+    std::vector<double> resid;
+    resid.reserve(nSamples);
+    for (int i = 0; i < nSamples; ++i)
+        resid.push_back(sensor.measure(trueT, rng) - trueT);
+    return noiseStats(resid);
+}
+
+TEST(SensorNoiseModelTest, TypeKThermocoupleRoundTrip) {
+    // Forward/inverse must be consistent: T(E(T)) == T over the oven range.
+    for (double T : {0.0, 25.0, 100.0, 200.0, 400.0}) {
+        EXPECT_NEAR(TypeKThermocouple::temp(TypeKThermocouple::emf(T)), T,
+                    0.05);
+    }
+}
+
+TEST(SensorNoiseModelTest, TypeKIsNearLinearInOvenRange) {
+    // Type K's Seebeck coefficient is almost constant over 0..400 C, so the
+    // inverse is locally linear and voltage noise stays ~symmetric: the
+    // induced temperature skew is negligible. This documents the contrast
+    // with the NTC case below.
+    TypeKThermocouple tc;   // sigmaV = 0.01 mV -> ~0.24 C
+    std::mt19937 rng(11);
+    for (double T : {50.0, 150.0, 300.0}) {
+        const auto st = sensorNoiseAt(tc, T, 60000, rng);
+        EXPECT_GT(st.stddev, 0.1);
+        EXPECT_LT(st.stddev, 0.5);
+        EXPECT_NEAR(st.mean, 0.0, 0.05);       // ~unbiased
+        EXPECT_LT(std::abs(st.skew), 0.05);     // ~symmetric
+    }
+}
+
+TEST(SensorNoiseModelTest, NtcProducesSkewedTemperatureDependentNoise) {
+    // The NTC divider inverse is strongly curved, so Gaussian voltage noise
+    // becomes skewed temperature noise whose gain grows with temperature.
+    // Use a larger sigmaV here so the skew is clearly resolvable above the
+    // finite-sample noise floor.
+    NtcThermistor ntc;
+    ntc.sigmaV = 0.010;   // 10 mV ADC noise -> ~1-3 C (noisy front end)
+    std::mt19937 rng(22);
+
+    const auto lo = sensorNoiseAt(ntc, 40.0, 80000, rng);
+    const auto hi = sensorNoiseAt(ntc, 200.0, 80000, rng);
+
+    // Spread is temperature-dependent: the divider sensitivity rises with T.
+    EXPECT_GT(hi.stddev, lo.stddev);
+    EXPECT_LT(hi.stddev, 8.0);                 // sanity bound
+    // Convex inverse -> positive skew, resolvable at this noise level.
+    EXPECT_GT(hi.skew, 0.05);
+    // And the noise is large enough to matter to the loop (not negligible).
+    EXPECT_GT(hi.stddev, 0.5);
+}
+
+TEST(OvenControllerTest, FopdtTracksWithNtcSensorNoise) {
+    const auto p = plantParams();
+    NtcThermistor ntc;                 // sigmaV = 3 mV -> ~0.2-0.5 C
+    OvenControllerConfig cfg;
+    cfg.model = p;
+    cfg.adaptParams = false;
+    cfg.sensorTau = 8.0;               // heavier filtering for noisy sensor
+
+    const auto sensorFn = [&ntc](double T, std::mt19937& rng) {
+        return ntc.measure(T, rng);
+    };
+    const auto res = simulate(p, cfg, testProfile(), 800.0, 0.5, 0.0, {},
+                              sensorFn);
+    EXPECT_LT(res.soakErr, 2.5);
+    EXPECT_LT(res.finalErr, 2.5);
+    EXPECT_LT(maxErrIn(res, 60.0, 240.0), 5.0);
+}
+
+TEST(OvenControllerTest, SopdtTracksWithNtcSensorNoise) {
+    const auto plantP = sopdtPlantParams();
+    NtcThermistor ntc;
+    OvenControllerConfig cfg;
+    cfg.modelOrder = OvenModelOrder::Sopdt;
+    cfg.modelSopdt = plantP;
+    cfg.model = plantP.toFopdtParams();
+    cfg.adaptParams = false;
+    cfg.sensorTau = 8.0;
+
+    TemperatureProfile prof(25.0);
+    prof.addRampSoak(80.0, 0.12, 400.0);
+    prof.addRampSoak(55.0, 0.12, 300.0);
+
+    const auto sensorFn = [&ntc](double T, std::mt19937& rng) {
+        return ntc.measure(T, rng);
+    };
+    const auto res = simulateSopdt(plantP, cfg, prof, 2000.0, 0.5, 0.0, {},
+                                   sensorFn);
+    ASSERT_FALSE(res.samples.empty());
+    for (const auto& s : res.samples) {
+        ASSERT_TRUE(std::isfinite(s.u));
+        EXPECT_GE(s.u, -1e-9);
+        EXPECT_LE(s.u, 1.0 + 1e-9);
+    }
+    // Slightly looser than the clean SOPDT case (soakErr<5, finalErr<6):
+    // the skewed sensor noise adds a small tracking penalty.
+    EXPECT_LT(res.soakErr, 6.5);
+    EXPECT_LT(res.finalErr, 7.5);
+}
+
+TEST(SOPDTParameterEstimatorTest, OeUnderNtcSensorNoise) {
+    // The output-error fit averages over a multi-tau window, so the small
+    // skew/bias of realistic thermistor noise should not prevent recovery
+    // of the identifiable quantities (DC gain K and the lag set).
+    const auto p = sopdtPlantParams();
+    OvenThermalModelSOPDT plant(p);
+    plant.reset();
+    NtcThermistor ntc;                 // sigmaV = 3 mV -> ~0.2-0.5 C
+    std::mt19937 rng(99);
+
+    SOPDTEstimatorConfig ec;
+    ec.windowTime = 300.0;
+    ec.windowLagFactor = 4.0;
+    ec.spinupFactor = 4.0;
+    ec.fitInterval = 15.0;
+    ec.simStride = 2.0;
+    ec.gridSize = 9;
+    ec.smoothing = 0.4;
+    SOPDTParameterEstimator est(ec);
+    est.setPrior(0.8, 0.006, 200.0, 0.0);
+
+    std::deque<std::pair<double, double>> hist;
+    const double dt = 0.5, delay = p.delay;
+    for (int i = 0; i < 12000; ++i) {         // 6000 s
+        const double t = i * dt;
+        double u = 0.4 + 0.3 * std::sin(2.0 * 3.14159265 * t / 47.0)
+                  + 0.15 * std::sin(2.0 * 3.14159265 * t / 13.0)
+                  + 0.10 * std::copysign(1.0, std::sin(2.0 * 3.14159265 * t / 29.0));
+        u = std::clamp(u, 0.0, 1.0);
+        hist.emplace_back(t, u);
+        while (hist.size() > 100 && t - hist.front().first > delay + 1.0)
+            hist.pop_front();
+        double uD = 0.0;
+        for (auto& [ti, ui] : hist)
+            if (ti <= t - delay) uD = ui;
+        const double Tnow = plant.temperature();
+        const double Tmeas = ntc.measure(Tnow, rng);   // voltage->T noise
+        plant.step(u, dt);
+        est.update(uD, Tmeas, 25.0, dt);
+    }
+
+    EXPECT_GT(est.updatesUsed(), 5);
+    const double Ktrue = p.alpha / p.beta;         // 200
+    EXPECT_NEAR(est.gain(), Ktrue, 0.35 * Ktrue);
+    double lags[2] = {est.tau1(), est.tau2()};
+    double truth[2] = {1.0 / p.beta, p.tau2};      // {200, 300}
+    std::sort(lags, lags + 2);
+    std::sort(truth, truth + 2);
+    EXPECT_NEAR(lags[0], truth[0], 0.5 * truth[0]);
+    EXPECT_NEAR(lags[1], truth[1], 0.5 * truth[1]);
+}
+
+TEST(ThermalParameterEstimatorTest, OpenLoopUnderNtcSensorNoise) {
+    // FOPDT integral estimator under the same voltage-domain noise: window
+    // averaging should keep {alpha,beta,d} recovery essentially intact.
+    auto p = plantParams();
+    p.alpha = 1.3; p.beta = 0.006;
+    OvenThermalModel plant(p);
+    plant.reset();
+    NtcThermistor ntc;
+    std::mt19937 rng(55);
+
+    EstimatorConfig ec;
+    ec.windowTime = 15.0;
+    ec.memTime = 150.0;
+    ec.smoothing = 0.5;
+    ThermalParameterEstimator est(ec);
+    est.setPrior(1.0, 0.005, 0.0);
+
+    std::deque<std::pair<double, double>> hist;
+    const double dt = 0.5, delay = 4.0;
+    for (int i = 0; i < 1600; ++i) {   // 800 s
+        const double t = i * dt;
+        double u = 0.35 + 0.25 * std::sin(2.0 * 3.14159265 * t / 47.0)
+                      + 0.10 * std::sin(2.0 * 3.14159265 * t / 13.0);
+        u = std::clamp(u, 0.0, 1.0);
+        hist.emplace_back(t, u);
+        while (hist.size() > 100 && t - hist.front().first > delay + 1.0)
+            hist.pop_front();
+        double uD = 0.0;
+        for (auto& [ti, ui] : hist)
+            if (ti <= t - delay) uD = ui;
+        plant.step(u, dt);
+        const double Tmeas = ntc.measure(plant.temperature(), rng);
+        est.update(uD, Tmeas, 25.0, dt);
+    }
+    EXPECT_NEAR(est.alpha(), 1.3, 0.15);
+    EXPECT_NEAR(est.beta(), 0.006, 0.002);
+    EXPECT_NEAR(est.disturbance(), 0.0, 0.15);
+    EXPECT_GT(est.updatesUsed(), 500);
 }
