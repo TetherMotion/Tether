@@ -81,6 +81,7 @@ struct AgentState {
     std::string forming;        // tool call currently forming
     long in_tok = 0, cached_tok = 0, out_tok = 0;
     std::string cost;           // "≈ $0.086" tail of the COST frame
+    std::string activity;       // TICK label — forming tool / model's text line
     std::string content_buf;    // streamed text not yet committed to log
 };
 
@@ -142,6 +143,7 @@ int main(int argc, char** argv) {
                     st.busy = true;
                     st.chars = 0;
                     st.forming.clear();
+                    st.activity.clear();
                     st.call_start = std::chrono::steady_clock::now();
                     flush_content();
                     push("── step " + std::to_string(st.step) +
@@ -152,6 +154,7 @@ int main(int argc, char** argv) {
                 } else if (k == "TICK") {
                     auto v = splitTab(p);
                     if (v.size() > 1) st.chars = atol(v[1].c_str());
+                    if (v.size() > 3 && !v[3].empty()) st.activity = v[3];
                 } else if (k == "TOOLFORM") {
                     st.forming = p;
                 } else if (k == "CONTENT") {
@@ -170,13 +173,16 @@ int main(int argc, char** argv) {
                     long cch = v.size() > 4 ? atol(v[4].c_str()) : 0;
                     long out = v.size() > 5 ? atol(v[5].c_str()) : 0;
                     long rea = v.size() > 6 ? atol(v[6].c_str()) : 0;
+                    std::string label = v.size() > 7 ? v[7] : "";
                     st.in_tok += pin; st.cached_tok += cch; st.out_tok += out;
                     push("step " + (v.empty() ? "?" : v[0]) + " done in " +
                          std::format("%.1fs", ms / 1000.0) + " [" + fin +
-                         "] — in " + fmtK(pin) + " (" + fmtK(cch) +
+                         "]" + (label.empty() ? "" : " — " + label) +
+                         " — in " + fmtK(pin) + " (" + fmtK(cch) +
                          " cached), out " + fmtK(out) +
                          (rea > 0 ? " (" + fmtK(rea) + " reasoning)" : ""),
                          LogLevel::Debug);
+                    st.activity.clear();
                 } else if (k == "TOOL") {
                     auto v = splitTab(p);
                     std::string line = v.empty() ? "?" : v[0];
@@ -296,7 +302,8 @@ int main(int argc, char** argv) {
                         " step " + std::to_string(st.step) + " · " +
                         Tether::UI::formatDuration(uint64_t(el)) + " · ↓" +
                         fmtK(st.chars);
-                    if (!st.forming.empty()) s += " · " + st.forming + "…";
+                    if (!st.activity.empty()) s += " · " + st.activity;
+                    else if (!st.forming.empty()) s += " · " + st.forming + "…";
                 } else if (st.finished) {
                     s = "● done";
                 } else if (awaiting) {
