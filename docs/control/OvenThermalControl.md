@@ -80,6 +80,125 @@ Details on model order (FOPDT vs. SOPDT vs. alternatives) and the
 method-selection knobs are in
 [Model support](#model-support-fopdt-sopdt-and-the-alternatives) below.
 
+## Terms & definitions
+
+Plain-language glossary for readers without a control-engineering
+background. Formal equations live in the sections that follow; this is
+the "what does the word mean" layer.
+
+**The oven itself (the "plant")**
+
+- **Plant** — control-engineering jargon for *the thing being
+  controlled*: here, the oven chamber, its air, walls, and whatever
+  product is inside. Nothing fancier than that.
+- **Thermal mass / heat capacity** — how much energy a body needs to
+  warm up. The oven walls and the product are big thermal masses, so
+  temperature changes slowly; a small heater can't warm them instantly.
+- **Heat loss (`β`)** — the rate at which the oven leaks heat to the
+  room. It sets how much steady heater power is needed just to *hold* a
+  temperature. Bigger `β` → more power to maintain the same setpoint.
+- **Dead time / delay (`θ`)** — the lag between commanding the heater
+  and the temperature actually responding (heater-element warmup, air
+  mixing, sensor placement). The controller must start heating *before*
+  the target time to compensate.
+- **FOPDT / SOPDT** — "First/Second-Order Plus Dead Time": a compact
+  mathematical model of the oven's response. FOPDT = one thermal mass +
+  heat loss + input delay. SOPDT adds a second cascaded mass for ovens
+  whose response clearly shows two lags.
+- **Coupling (`γ`)** — heat flowing *between* adjacent zones through
+  shared walls or air, measured as a rate [1/s]. Strong coupling means
+  one zone's heater noticeably warms its neighbor.
+- **Coupled gradient** — a temperature profile that is *both* a goal
+  (zones intentionally held at different temperatures, e.g. zone 2 =
+  zone 1 + 10 °C) *and* a disturbance (the zones are thermally linked,
+  so they constantly exchange heat while trying to hold that difference).
+- **Disturbance (`d`)** — any unmeasured heat source or sink: opening the
+  door, loading a cold part, a fan, a burner cycling. The controller
+  can't see it directly and must reject it.
+- **One-sided cooling** — the actuator can only *add* heat or only
+  *remove* it passively (no active refrigeration). A zone cannot be
+  cooled faster than it loses heat on its own — a hard physical limit.
+
+**Control structure**
+
+- **Setpoint / reference (`r`)** — the target temperature (or
+  temperature-vs-time trajectory) the oven should follow.
+- **Feedforward (FF)** — the *predictive* half of control: use the
+  physics model to compute in advance the heater power needed, before
+  any error is measured. Like pre-heating the oven before the recipe
+  calls for it.
+- **Feedback** — the *reactive* half: compare the measured temperature
+  to the target and apply corrective power for the remaining error.
+- **Controller / compensator** — the rule that turns "how far off are
+  we" into "how much power to add." PI, LQI, and LQG are different
+  compensator designs.
+- **PI / PID** — Proportional-Integral(-Derivative). *Proportional*
+  reacts to the current error, *Integral* removes steady-state offset
+  (and rejects constant disturbances), *Derivative* anticipates rapid
+  change (used for the SOPDT second lag). The gains are derived from
+  the thermal model, not hand-tuned.
+- **IMC — Internal Model Control** — a control *structure*: carry a copy
+  of the plant's physics inside the controller ("internal model"), use
+  it to compute feedforward, then let feedback robustify the result.
+  "Model-inverse feedforward" is the IMC idea applied live.
+- **Gain / tuning** — the multiplier(s) converting error into control
+  action. "Tuning" = choosing them; here they are *derived* from the
+  physical parameters rather than set by hand.
+- **Anti-windup** — protection that stops the integral term from
+  accumulating while the heater is saturated (already at 0 % or 100 %),
+  so it doesn't overshoot wildly once it unsaturates.
+- **Actuator saturation** — the heater output is physically bounded
+  (e.g. 0–100 %, or a slew-rate limit); the controller must respect it.
+
+**Multi-zone control**
+
+- **SISO** — Single-Input Single-Output: one heater, one sensor, one
+  independent control loop.
+- **MIMO** — Multiple-Input Multiple-Output: several heaters and sensors
+  handled by *one* controller that accounts for how they interact.
+- **Decentralized control** — each zone runs its own independent SISO
+  loop; zones share no state and do not coordinate. Neighbor heat is
+  injected only as a measured disturbance (`OvenGradientController`).
+- **Centralized control** — one controller sees *all* zone temperatures
+  and computes *all* heater outputs together, explicitly exploiting the
+  coupling (`OvenGradientLQGController`).
+- **Gradient weighting** — making the *difference between adjacent
+  zones* a first-class term in the control cost, so the controller
+  directly regulates `T_i − T_{i−1}` instead of letting it emerge by
+  accident.
+- **LQI / LQG** — "Linear-Quadratic (Integral / Gaussian)": optimal-
+  control methods that pick gains minimizing a weighted cost — tracking
+  error plus control effort — subject to the model. *LQI* adds integral
+  action (kills steady-state offset); *LQG* adds a state observer. The
+  MIMO versions handle all zones at once and are the recommended
+  methodology for coupled gradients.
+- **Observer / Kalman filter** — a device that fuses the physics-model
+  prediction with sensor readings to estimate states that are noisy,
+  delayed, or not directly measured.
+- **Non-minimum-phase** — a plant whose mathematically "perfect"
+  inverse would be *unstable* (thermal coupling creates these). This is
+  why the controller uses robust optimal gains instead of literally
+  inverting the model.
+
+**Estimation & adaptation**
+
+- **Estimator / identification** — fitting the physical parameters
+  `{α, β, γ, d}` from measured input/output data while the oven runs.
+- **Adaptation / online retuning** — periodically pushing those fitted
+  parameters back into the model and re-deriving the controller gains,
+  so the control improves as the oven's real behavior is learned.
+- **Persistency of excitation / dither** — a small deliberate wiggle
+  added to the heater power so the estimator can tell the parameters
+  apart. Without it, a smoothly-controlled oven gives the estimator
+  ambiguous data and the fit is biased.
+- **Excitation gating** — the estimator only updates when the data is
+  actually informative (temperature or input is moving enough); during
+  a steady soak it holds its last good estimate rather than fitting
+  noise.
+- **Bounded / projected estimate** — parameter updates are clamped to a
+  physically possible range, so a bad data window can never produce an
+  absurd model.
+
 ## Plant model
 
 `cfg.modelOrder` selects the plant model — **user-selected, never
