@@ -78,6 +78,7 @@ struct AgentState {
     long chars = 0;             // stream bytes received this call
     std::string forming;        // tool call currently forming
     long in_tok = 0, cached_tok = 0, out_tok = 0;
+    std::string cost;           // "≈ $0.086" tail of the COST frame
     std::string content_buf;    // streamed text not yet committed to log
 };
 
@@ -201,6 +202,10 @@ int main(int argc, char** argv) {
                          (v.size() > 1 ? v[1] : "") + " — " +
                          (v.size() > 2 ? v[2] : ""),
                          ok ? LogLevel::Info : LogLevel::Error);
+                } else if (k == "COST") {
+                    push("cost — " + p, LogLevel::Info);
+                    auto d = p.find("≈");
+                    st.cost = d == std::string::npos ? p : p.substr(d);
                 } else if (k == "DONE") {
                     auto v = splitTab(p);
                     bool ok = !v.empty() && v[0] == "1";
@@ -273,6 +278,7 @@ int main(int argc, char** argv) {
                     s += "  |  in " + fmtK(st.in_tok) + " (" +
                          fmtK(st.cached_tok) + " cached) out " +
                          fmtK(st.out_tok);
+                if (!st.cost.empty()) s += "  |  " + st.cost;
                 mvprintw(sy, 0, "%s", s.c_str());
                 for (int x = int(s.size()); x < COLS; ++x) mvaddch(sy, x, ' ');
                 attroff(A_REVERSE);
