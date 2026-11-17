@@ -4,9 +4,9 @@
  * @file ChatScreen.hpp
  * @brief Ready-made PanelScreen for an agent-chat session: scrollable
  *        transcript + input line, driven by a UI::ChatSession model and
- *        a Utils::FramedChild transport (`SEND`/`QUIT` outbound).
+ *        a Utils::IFramePump transport (SEND/QUIT outbound).
  *
- *   ChatSession ses;  FramedChild child;  // host spawns + wires sendFrame
+ *   ChatSession ses;  IFramePump pump;    // e.g. FramedChild or in-proc queue
  *   ChatScreen screen("kico chat — gen/", child, ses);
  *   screen.run(cancel);
  *   child.quit();
@@ -16,7 +16,7 @@
 #include <string>
 
 #include "tether/ui/ChatSession.hpp"
-#include "tether/utils/FramedChild.hpp"
+#include "tether/utils/FramePump.hpp"
 
 namespace Tether {
 namespace TUI {
@@ -24,7 +24,7 @@ namespace TUI {
 class ChatScreen {
 public:
     ChatScreen(std::string title,
-               Utils::FramedChild& child,
+               Utils::IFramePump& child,
                UI::ChatSession& ses);
 
     /**Run the draw/dispatch loop until 'q'/Esc or `cancel`. */
@@ -32,7 +32,7 @@ public:
 
 private:
     std::string         title_;
-    Utils::FramedChild* child_;
+    Utils::IFramePump* child_;
     UI::ChatSession*    ses_;
 };
 

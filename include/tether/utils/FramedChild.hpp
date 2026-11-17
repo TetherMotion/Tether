@@ -30,14 +30,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "tether/utils/FramePump.hpp"
+
 namespace Tether {
 namespace Utils {
-
-/// One decoded frame.
-struct Frame {
-    std::string kind;
-    std::string payload;
-};
 
 /// Options for FramedChild::spawn().
 struct FramedChildOpts {
@@ -48,7 +44,7 @@ struct FramedChildOpts {
     /// exe + args verbatim via execvp(exe, [exe, args...]).
 };
 
-class FramedChild {
+class FramedChild : public IFramePump {
 public:
     FramedChild() = default;
     FramedChild(const FramedChild&) = delete;
@@ -95,7 +91,7 @@ public:
         return true;
     }
 
-    bool alive() const { return !dead_; }
+    bool alive() const override { return !dead_; }
     pid_t pid() const { return pid_; }
 
     /**Send one frame. */
@@ -129,7 +125,7 @@ public:
      * Pump available bytes; returns every complete frame received
      * since the last call. Sets `dead_` on EOF/EBADF.
      */
-    std::vector<Frame> poll() {
+    std::vector<Frame> poll() override {
         std::vector<Frame> out;
         if (from_child_ < 0) return out;
         char buf[16384];
@@ -165,7 +161,7 @@ public:
      * backtraces. Complete lines are preferred by callers; trailing
      * partial line bytes are kept buffered here.
      */
-    std::string drainErr() {
+    std::string drainErr() override {
         if (err_ < 0) return {};
         char buf[8192];
         for (;;) {

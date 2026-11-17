@@ -14,7 +14,7 @@ namespace Tether {
 namespace TUI {
 
 ChatScreen::ChatScreen(std::string title,
-                       Utils::FramedChild& child,
+                       Utils::IFramePump& child,
                        UI::ChatSession& ses)
     : title_(std::move(title)), child_(&child), ses_(&ses) {}
 

@@ -14,7 +14,7 @@ namespace Tether {
 namespace TUI {
 
 AgentMonitorScreen::AgentMonitorScreen(std::string title,
-                                       Utils::FramedChild& child,
+                                       Utils::IFramePump& child,
                                        UI::AgentMonitor& mon)
     : title_(std::move(title)), child_(&child), mon_(&mon) {}
 
