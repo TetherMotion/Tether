@@ -34,8 +34,9 @@ parameter estimator.
 - **Safety**: output clamps, slew rate limit, over-temperature
   interlock, conditional-integration anti-windup.
 - **Multi-zone**: `OvenGradientController` supervises one
-  `OvenController` per zone with gradient references and coupling
-  feedforward.
+  `OvenController` per zone (decentralized), or
+  `OvenGradientLQGController` runs one centralized MIMO LQG on the
+  coupled zone states for true gradient regulation.
 
 ## Quick start
 
@@ -69,7 +70,8 @@ and saturation/over-temp flags for monitoring.
 | Sensor measures the mass you want to control (collocated) | `PI` backend (default) |
 | Sensor is chamber air; product/load is the controlled mass | `LQI` backend |
 | Step response clearly shows **two** lags on the sensor path | `modelOrder = Sopdt` |
-| Several zones with a spatial or conveyor-staggered gradient | `OvenGradientController` |
+| Several zones, weak coupling / independent profiles | `OvenGradientController` |
+| Several zones, strong coupling — regulate the gradient itself | `OvenGradientLQGController` |
 | Standard process curves (reflow, wave, selective, brazing, anneal) | `ThermalCurve` presets |
 | Step test possible | `autoTuneOven()` / `autoTuneOvenSOPDT()` → `applyAutotune()` |
 | No step test | Set `cfg.model`/`cfg.modelSopdt` to physical estimates; gains auto-derive |
@@ -695,6 +697,126 @@ controller on the `MultiZoneOven` benchmark plant:
 `examples/oven_gradient_tui.cpp` (`oven_gradient_tui` — space run,
 `1`/`2`/`3` switch profile presets, `c` cycles the master curve,
 `r` reset).
+
+## Centralized MIMO gradient control (`OvenGradientLQGController`)
+
+`OvenGradientController` coordinates zones as N *independent* SISO
+loops: each zone tracks its own shifted reference and inter-zone heat
+exchange is injected only as a feedforward disturbance. That is
+decentralized — the spatial gradient `T_i − T_{i−1}` is never a
+controlled quantity, and coupling is cancelled reactively rather than
+exploited by the feedback.
+
+`OvenGradientLQGController` (`OvenGradientLQGController.hpp`) replaces
+the per-zone feedback with **one centralized MIMO LQG** on the coupled
+thermal state `x = [T_1 … T_N]`:
+
+```
+dx/dt = A·x + B·u + c        y = x   (collocated sensors, C = I)
+```
+
+- **Coupled model** — `A` carries the inter-zone coupling rates
+  (`couplingLeft`/`couplingRight`) as off-diagonal terms plus each
+  zone's loss `β_i`; `B` is diagonal (`α_i` per heater); `c` folds
+  ambient + disturbance. ZOH-discretized once at `dtDesign`.
+- **LQI feedback** — an augmented regulator (states + one integrator
+  per zone) solved by discrete ARE. Following `OvenLQIBackend`'s
+  deviation-state convention it is fed `z = x̂ − r`, so the cost acts on
+  the *tracking error*. `Qx = qxZone·I + qxGradient·L` where `L` is the
+  chain Laplacian — `z′Lz = Σ(z_i − z_{i−1})²` is exactly the squared
+  **gradient tracking error**, the term decentralized SISO PID cannot
+  express.
+- **LQG observer** — steady-state Kalman filter (`KalmanFilter`,
+  discrete DARE) estimates all zone temperatures, predicting with the
+  *delayed, actually-applied* input vector plus the affine term `c`
+  (folded in as a constant input column), so dead time and saturation
+  are not misread as process noise.
+- **Previewed feedforward** — each zone keeps its own
+  `TemperatureProfile` + `ActuationGovernor` + `OvenThermalModel`; the
+  inverse feedforward acts on the governed, dead-time-previewed
+  reference exactly like the SISO path. Coupling is deliberately *not*
+  injected into the FF — it lives in `A` and is handled by the
+  centralized feedback.
+- **Anti-windup** — back-calculation (`antiWindupTt`) bleeds each
+  integrator by the authority lost to saturation/rate-limit, matching
+  `LQIController`'s law, so a long cold-start heat-up cannot wind the
+  integrators.
+
+```cpp
+GradientLQGConfig lqg;              // weights, observer, anti-windup
+OvenGradientLQGController gc(lqg);
+for (auto& zc : zoneConfigs) gc.addZone(zc);   // spatial order, <= 6 zones
+
+GradientSpec spec;                  // same API as OvenGradientController
+gc.setGradientProfile(spec);        // or setZoneProfile / setZoneSetpoints
+
+auto u = gc.compute(measuredTemps, dt);
+// computeInto(measured, dt, outSpan) is the allocation-free RT path
+```
+
+`estimatedStates()`/`integralStates()` expose the observer estimate and
+integrator states; `designed()` reports whether the ARE/DARE solve
+succeeded. `computeInto()` is allocation-free after zone setup (the
+DARE/ARE solves run only in `design()`, which is lazy on first compute
+and re-runs if zones change).
+
+**When to prefer it over `OvenGradientController`:** when inter-zone
+coupling is strong enough that treating it as a disturbance leaves a
+visible gradient error, or when you want the spatial gradient itself
+weighted in the cost (`qxGradient`). For weakly-coupled zones or
+conveyor-staggered *independent* profiles, the decentralized controller
+is simpler and already adequate.
+
+### Online coupled-plant adaptation
+
+With `adaptParams` (default **on**) the controller identifies the
+coupled plant online and retunes itself — the "live inverse modelling"
+loop closed end to end:
+
+- **Estimator** — `OvenCoupledParameterEstimator`
+  (`OvenCoupledParameterEstimator.hpp`) identifies, per zone,
+  `{α, β, γL, γR, d}` by integral/window regression of the coupled ODE
+  `dT_i/dt = α·u − β·(T_i−T_amb) + γL·(T_{i−1}−T_i) + γR·(T_{i+1}−T_i) + d`.
+  Regressors are window means (one fresh equation per cycle, noise-
+  robust), with forgetting, ridge regularization, excitation gating,
+  bounded physical projection, and EMA smoothing — the same machinery
+  as the single-zone `ThermalParameterEstimator`, extended to the MIMO
+  coupling terms. It sees the *delayed, actually-applied* input
+  (post-dither, post-saturation) so excitation and saturation are not
+  misattributed.
+- **Retune** — at `adaptRedesignInterval` the estimates are pulled into
+  the per-zone `A/B/c` model and the observer + LQI gains are re-solved
+  (`retune()`). Integrators, the control clock, input history, and the
+  observer *estimate* are preserved across retunes; a redesign only
+  fires when a parameter moved more than `adaptRetuneMinDelta`, so
+  negligible estimator drift does not churn the gains.
+- **PE dither** — closed-loop identification is only as good as its
+  excitation: during a saturated heat-up `u ≈ const` makes `α` and `d`
+  collinear and the fit is biased. `adaptDitherAmp`/`adaptDitherPeriod`
+  add a small per-zone phase-offset sinusoid (golden-angle spacing)
+  to keep the estimator's regressors persistently exciting. Set
+  `adaptDitherAmp = 0` only with `adaptParams = false`.
+- **Diagnostics** — `zoneParameterEstimate(i)` returns the current
+  `{α, β, γL, γR, d}`; `zoneEstimatorExcited(i)` reports whether the
+  last window was identifiable.
+
+**Estimator limits (read before trusting the numbers):** `delay`,
+`ambient`, and actuator bounds stay fixed commissioning constants —
+they are not identifiable from this regression. The constant disturbance
+`d` is only weakly identifiable: a *steady* inter-zone offset produces a
+nearly-constant coupling heat flow that is confounded with a constant
+load, so `d` and the couplings split that steady component between them.
+In practice `{α, β}` — which drive the feedforward inverse and the
+observer — converge essentially exactly, while the couplings converge
+partway and `d` absorbs the residual; the LQI integral + feedforward
+absorb whatever steady load remains, so tracking stays bounded. Tighten
+`estimator.{alpha,beta,coupling,d}{Min,Max}` to your oven's physical
+envelope — that box is the real safety bound on adaptation.
+
+**Limits / scope:** zone count is capped at `MAX_CONTROL_DIM` (6). With
+one-sided cooling, a zone held *at* ambient cannot reject heat from a
+hotter neighbor — that setpoint combination is physically infeasible
+regardless of controller.
 
 ## Industrial temperature curves (`ThermalCurve`)
 

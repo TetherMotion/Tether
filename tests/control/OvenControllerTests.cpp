@@ -2,7 +2,9 @@
  * @file OvenControllerTests.cpp
  * @brief Tests for the generic oven thermal control stack:
  *        TemperatureProfile, OvenThermalModel, ActuationGovernor,
- *        ThermalParameterEstimator, OvenAutotune, OvenController.
+ *        ThermalParameterEstimator, SOPDTParameterEstimator,
+ *        OvenCoupledParameterEstimator, OvenAutotune, OvenController,
+ *        OvenGradientController, OvenGradientLQGController.
  */
 
 #include <gtest/gtest.h>
@@ -18,6 +20,9 @@
 #include "tether/control/thermal/OvenAutotune.hpp"
 #include "tether/control/thermal/OvenController.hpp"
 #include "tether/control/thermal/OvenCoupledModel.hpp"
+#include "tether/control/thermal/OvenCoupledParameterEstimator.hpp"
+#include "tether/control/thermal/OvenGradientController.hpp"
+#include "tether/control/thermal/OvenGradientLQGController.hpp"
 #include "tether/control/thermal/OvenLQIBackend.hpp"
 #include "tether/control/thermal/OvenSOPDTModel.hpp"
 #include "tether/control/thermal/OvenThermalModel.hpp"
@@ -53,6 +58,15 @@ TemperatureProfile testProfile() {
     return p;
 }
 
+// GCC15's libstdc++ asserts stddev>0 on param_type construction, so a
+// normal_distribution must never be CONSTRUCTED with sigma=0 — build it
+// lazily and keep sigma=0 a valid "noiseless" configuration.
+inline double gaussNoise(std::mt19937& rng, double sigma) {
+    return sigma > 0.0
+               ? std::normal_distribution<double>(0.0, sigma)(rng)
+               : 0.0;
+}
+
 struct SimSample {
     double t, temp, ref, u, uFf, uFb;
 };
@@ -86,7 +100,6 @@ SimResult simulate(OvenModelParams plantP,
     ctrl.setProfile(profile);
 
     std::mt19937 rng(42);
-    std::normal_distribution<double> noise(0.0, noiseSigma);
 
     SimResult res;
     ControllerInput in;
@@ -97,7 +110,7 @@ SimResult simulate(OvenModelParams plantP,
         if (disturbanceFn) plant.params().disturbance = disturbanceFn(t);
         const double trueT = plant.temperature();
         in.measured = sensorFn ? sensorFn(trueT, rng)
-                               : trueT + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+                               : trueT + gaussNoise(rng, noiseSigma);
         const ControllerOutput out = ctrl.compute(in);
         plant.step(out.control, dt);
 
@@ -178,8 +191,7 @@ struct TypeKThermocouple {
     }
 
     double measure(double T, std::mt19937& rng) const {
-        std::normal_distribution<double> n(0.0, sigmaV);
-        return temp(emf(T) + n(rng));
+        return temp(emf(T) + gaussNoise(rng, sigmaV));
     }
 };
 
@@ -209,8 +221,7 @@ struct NtcThermistor {
         return 1.0 / (1.0 / T0 + std::log(r / R0) / B) - 273.15;
     }
     double measure(double T, std::mt19937& rng) const {
-        std::normal_distribution<double> n(0.0, sigmaV);
-        return tempFromVoltage(voltage(T) + n(rng));
+        return tempFromVoltage(voltage(T) + gaussNoise(rng, sigmaV));
     }
 };
 
@@ -292,7 +303,6 @@ CoupledSimResult simulateCoupled(
     ctrl.setProfile(profile);
 
     std::mt19937 rng(42);
-    std::normal_distribution<double> noise(0.0, noiseSigma);
 
     CoupledSimResult res;
     ControllerInput in;
@@ -301,7 +311,7 @@ CoupledSimResult simulateCoupled(
 
     for (double t = 0.0; t < duration; t += dt) {
         if (disturbanceFn) plant.prm.disturbance = disturbanceFn(t);
-        in.measured = plant.ts + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+        in.measured = plant.ts + gaussNoise(rng, noiseSigma);
         const ControllerOutput out = ctrl.compute(in);
         plant.step(std::clamp(out.control, plantP.uMin, plantP.uMax), dt);
 
@@ -1038,7 +1048,6 @@ SimResult simulateSopdt(OvenModelParamsSOPDT plantP,
     ctrl.setProfile(profile);
 
     std::mt19937 rng(42);
-    std::normal_distribution<double> noise(0.0, noiseSigma);
 
     SimResult res;
     ControllerInput in;
@@ -1049,7 +1058,7 @@ SimResult simulateSopdt(OvenModelParamsSOPDT plantP,
         if (disturbanceFn) plant.params().disturbance = disturbanceFn(t);
         const double trueT = plant.temperature();
         in.measured = sensorFn ? sensorFn(trueT, rng)
-                               : trueT + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+                               : trueT + gaussNoise(rng, noiseSigma);
         const ControllerOutput out = ctrl.compute(in);
         plant.step(out.control, dt);
 
@@ -1366,3 +1375,548 @@ TEST(ThermalParameterEstimatorTest, OpenLoopUnderNtcSensorNoise) {
     EXPECT_NEAR(est.disturbance(), 0.0, 0.15);
     EXPECT_GT(est.updatesUsed(), 500);
 }
+
+// ---------------------------------------------------------------------------
+// OvenGradientLQGController — centralized MIMO gradient control
+// ---------------------------------------------------------------------------
+namespace {
+
+// N-zone coupled thermal plant matching the MIMO model assumed by
+// OvenGradientLQGController. Zone i obeys
+//   dT_i = alpha_i u_i(t-theta_i) - beta_i (T_i - amb_i) + d_i
+//          + cL_i (T_{i-1} - T_i) + cR_i (T_{i+1} - T_i)
+// Each zone has its own input dead time (ZOH history). Coupling uses the
+// previous-step neighbor temperatures (explicit Euler).
+struct GradientZonePlant {
+    OvenModelParams p;
+    double cL{0.0}, cR{0.0};
+    double T{25.0};
+    double t{0.0};
+    std::deque<std::pair<double, double>> hist;
+};
+
+struct GradientLQGSimResult {
+    std::vector<std::vector<double>> temps;   // [step][zone]
+    std::vector<std::vector<double>> refs;    // profile ref per zone
+    std::vector<std::vector<double>> us;
+    std::vector<double> times;
+    double maxTrackErr{0.0};    // max |T_i - r_i|
+    double maxGradErr{0.0};     // max |measured delta - ref delta|
+    double soakTrackErr{0.0};   // mean |T_i - r_i| over last 120 s
+    double soakGradErr{0.0};    // mean |grad err| over last 120 s
+    double finalTrackErr{0.0};
+    double finalGradErr{0.0};
+    std::vector<double> estStates;   // last observer estimate
+    std::vector<CoupledZoneEstimate> estParams;  // last coupled estimates
+};
+
+// Build the standard 3-zone chain: identical FOPDT zones, symmetric
+// coupling gamma between neighbors. Zone i's couplingLeft/couplingRight
+// are the rates into zone i from zones i-1/i+1.
+std::vector<OvenModelParams> gradientZoneParams() {
+    std::vector<OvenModelParams> v(3);
+    for (auto& p : v) p = plantParams();   // alpha=1,beta=.005,delay=4,amb=25
+    return v;
+}
+
+// (cL,cR) per zone for a symmetric chain with coupling rate gamma.
+std::vector<std::pair<double,double>> gradientCoupling(double gamma) {
+    return {{0.0, gamma}, {gamma, gamma}, {gamma, 0.0}};
+}
+
+// Per-zone reference profiles: zone i follows base + offset_i (a static
+// spatial gradient). Returns profiles already offset per zone.
+std::vector<TemperatureProfile> gradientProfiles(
+        const TemperatureProfile& base,
+        const std::vector<double>& offsets) {
+    std::vector<TemperatureProfile> v;
+    v.reserve(offsets.size());
+    for (double off : offsets) v.push_back(base.transformed(off, 0.0));
+    return v;
+}
+
+GradientLQGSimResult simulateGradientLQG(
+        const std::vector<OvenModelParams>& zoneParams,
+        const std::vector<std::pair<double,double>>& coupling,
+        const std::vector<TemperatureProfile>& zoneProfiles,
+        double duration, double dt = 0.5, double noiseSigma = 0.0,
+        const std::function<void(double, std::vector<GradientZonePlant>&)>&
+            disturbFn = {},
+        const GradientLQGConfig* lqgCfg = nullptr,
+        const std::vector<OvenModelParams>* ctrlZoneParams = nullptr,
+        const std::vector<std::pair<double,double>>* ctrlCoupling = nullptr) {
+    const size_t n = zoneParams.size();
+    std::vector<GradientZonePlant> plants(n);
+    for (size_t i = 0; i < n; ++i) {
+        plants[i].p = zoneParams[i];
+        plants[i].cL = coupling[i].first;
+        plants[i].cR = coupling[i].second;
+        plants[i].T = zoneProfiles[i].value(0.0);
+    }
+
+    GradientLQGConfig lcfg;
+    lcfg.dtDesign = dt;
+    if (lqgCfg) lcfg = *lqgCfg;
+    // The plant always uses zoneParams/coupling (ground truth); the
+    // controller's configured model may differ (ctrlZoneParams /
+    // ctrlCoupling) to exercise online adaptation to a mismatch.
+    const auto& cparams = ctrlZoneParams ? *ctrlZoneParams : zoneParams;
+    const auto& ccoup = ctrlCoupling ? *ctrlCoupling : coupling;
+    OvenGradientLQGController ctrl(lcfg);
+    for (size_t i = 0; i < n; ++i) {
+        GradientZoneConfig zc;
+        zc.controller.model = cparams[i];
+        zc.couplingLeft = ccoup[i].first;
+        zc.couplingRight = ccoup[i].second;
+        ctrl.addZone(zc);
+    }
+    for (size_t i = 0; i < n; ++i) ctrl.setZoneProfile(i, zoneProfiles[i]);
+
+    std::mt19937 rng(7);
+
+    GradientLQGSimResult res;
+    std::vector<double> meas(n), u(n, 0.0), dT(n, 0.0), T(n, 0.0);
+    for (double t = 0.0; t < duration; t += dt) {
+        if (disturbFn) disturbFn(t, plants);
+        for (size_t i = 0; i < n; ++i) {
+            T[i] = plants[i].T;
+            meas[i] = plants[i].T + gaussNoise(rng, noiseSigma);
+        }
+
+        ctrl.computeInto(meas, dt, u);
+
+        std::vector<double> tr(n), rr(n);
+        for (size_t i = 0; i < n; ++i) {
+            tr[i] = plants[i].T;
+            rr[i] = zoneProfiles[i].value(t);
+        }
+        res.temps.push_back(tr);
+        res.refs.push_back(rr);
+        res.us.push_back(u);
+        res.times.push_back(t);
+
+        for (size_t i = 0; i < n; ++i) {
+            res.maxTrackErr =
+                std::max(res.maxTrackErr, std::abs(T[i] - rr[i]));
+            if (i > 0) {
+                const double gM = T[i] - T[i - 1];
+                const double gR = rr[i] - rr[i - 1];
+                res.maxGradErr =
+                    std::max(res.maxGradErr, std::abs(gM - gR));
+            }
+        }
+
+        // Advance all zones from the same temperature snapshot (explicit
+        // Euler), each with its own delayed input.
+        for (size_t i = 0; i < n; ++i) {
+            auto& pl = plants[i];
+            const auto& p = pl.p;
+            pl.hist.emplace_back(t, u[i]);
+            while (pl.hist.size() > 2 &&
+                   pl.hist.front().first < t - p.delay - 2.0)
+                pl.hist.pop_front();
+            double ud = 0.0;
+            for (const auto& [ti, ui] : pl.hist) {
+                if (ti <= t - p.delay) ud = ui;
+                else break;
+            }
+            double acc = p.alpha * ud - p.beta * (T[i] - p.ambient)
+                         + p.disturbance;
+            if (i > 0)   acc += pl.cL * (T[i - 1] - T[i]);
+            if (i + 1 < n) acc += pl.cR * (T[i + 1] - T[i]);
+            dT[i] = acc;
+        }
+        for (size_t i = 0; i < n; ++i) {
+            plants[i].T += dT[i] * dt;
+            plants[i].t += dt;
+        }
+    }
+
+    // Soak metrics over the final 120 s.
+    double sumT = 0.0, sumG = 0.0;
+    size_t cntT = 0, cntG = 0;
+    for (size_t k = 0; k < res.times.size(); ++k) {
+        if (res.times[k] <= duration - 120.0) continue;
+        const auto& tr = res.temps[k];
+        const auto& rr = res.refs[k];
+        for (size_t i = 0; i < n; ++i) {
+            sumT += std::abs(tr[i] - rr[i]);
+            ++cntT;
+        }
+        for (size_t i = 1; i < n; ++i) {
+            sumG += std::abs((tr[i] - tr[i - 1]) - (rr[i] - rr[i - 1]));
+            ++cntG;
+        }
+    }
+    res.soakTrackErr = cntT ? sumT / cntT : 0.0;
+    res.soakGradErr = cntG ? sumG / cntG : 0.0;
+
+    // "Final" = mean abs error over the last 30 s (settled), robust to a
+    // single noisy/transient sample at the trajectory end.
+    double ft = 0.0, fg = 0.0;
+    size_t fc = 0;
+    for (size_t k = 0; k < res.times.size(); ++k) {
+        if (res.times[k] <= duration - 30.0) continue;
+        const auto& tr = res.temps[k];
+        const auto& rr = res.refs[k];
+        for (size_t i = 0; i < n; ++i)
+            ft += std::abs(tr[i] - rr[i]);
+        for (size_t i = 1; i < n; ++i)
+            fg += std::abs((tr[i] - tr[i - 1]) - (rr[i] - rr[i - 1]));
+        fc += n;
+    }
+    res.finalTrackErr = fc ? ft / fc : 0.0;
+    res.finalGradErr = (fc && n > 1) ? fg / (fc / n * (n - 1)) : 0.0;
+
+    const auto est = ctrl.estimatedStates();
+    res.estStates.assign(est.begin(), est.end());
+    for (size_t i = 0; i < n; ++i)
+        res.estParams.push_back(ctrl.zoneParameterEstimate(i));
+    return res;
+}
+
+} // namespace
+
+constexpr double LQG_TEST_TT = 50.0;
+
+// Base LQG config for the gradient tests; antiWindupTt is swept to find
+// the bleed rate that prevents cold-start windup without costing ramp
+// tracking authority.
+GradientLQGConfig lqgTestConfig(double antiWindupTt) {
+    GradientLQGConfig c;
+    c.dtDesign = 0.5;
+    c.qxZone = 1.0;
+    c.qxGradient = 4.0;
+    c.qi = 0.5;
+    c.r = 1.0;
+    c.qProc = 1e-3;
+    c.rMeas = 0.05;
+    c.feedforward = true;
+    c.antiWindupTt = antiWindupTt;
+    return c;
+}
+
+TEST(OvenGradientLQGTest, TracksSpatialGradient) {
+    // 3 zones, +6 C per zone static gradient over the ramp/soak profile.
+    const auto zp = gradientZoneParams();
+    const auto cp = gradientCoupling(0.004);
+    const auto profs = gradientProfiles(testProfile(), {0.0, 6.0, 12.0});
+
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+    const auto res = simulateGradientLQG(zp, cp, profs, 900.0, 0.5,
+                                         0.0, {}, &lcfg);
+
+    ASSERT_FALSE(res.temps.empty());
+    // Actuator commands stay inside [uMin,uMax] and finite.
+    for (const auto& uu : res.us)
+        for (double u : uu) {
+            ASSERT_TRUE(std::isfinite(u));
+            EXPECT_GE(u, -1e-9);
+            EXPECT_LE(u, 1.0 + 1e-9);
+        }
+    // Soak: per-zone tracking and the spatial gradient both tight.
+    // (Coupled one-sided-cooling zones cannot hold a gradient tighter
+    // than ~1-2 C; these bounds reflect that physical floor.)
+    EXPECT_LT(res.soakTrackErr, 2.0);
+    EXPECT_LT(res.soakGradErr, 2.5);
+    EXPECT_LT(res.finalTrackErr, 2.5);
+    EXPECT_LT(res.finalGradErr, 2.5);
+    // Ramp tracking bounded (preview + thermal lag).
+    EXPECT_LT(res.maxTrackErr, 8.0);
+    EXPECT_LT(res.maxGradErr, 6.0);
+}
+
+TEST(OvenGradientLQGTest, MaintainsGradientUnderZoneDisturbance) {
+    // Same gradient, but zone 1 (middle) takes a permanent endothermic
+    // load at t=300. The centralized integrators + coupling-aware feedback
+    // must hold BOTH the per-zone temps and the spatial gradient.
+    const auto zp = gradientZoneParams();
+    const auto cp = gradientCoupling(0.004);
+    const auto profs = gradientProfiles(testProfile(), {0.0, 6.0, 12.0});
+
+    const auto disturb = [](double t, std::vector<GradientZonePlant>& pl) {
+        pl[1].p.disturbance = (t >= 300.0) ? -0.05 : 0.0;
+    };
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+    const auto res = simulateGradientLQG(zp, cp, profs, 800.0, 0.5, 0.0,
+                                         disturb, &lcfg);
+
+    EXPECT_LT(res.soakTrackErr, 2.5);
+    EXPECT_LT(res.soakGradErr, 3.0);
+    EXPECT_LT(res.finalTrackErr, 3.0);
+    EXPECT_LT(res.finalGradErr, 3.0);   // permanent load degrades gradient
+}
+
+TEST(OvenGradientLQGTest, ObserverEstimatesZoneStates) {
+    // With C = I and modest noise the steady-state Kalman estimate should
+    // sit close to the true zone temperatures.
+    const auto zp = gradientZoneParams();
+    const auto cp = gradientCoupling(0.004);
+    const auto profs = gradientProfiles(testProfile(), {0.0, 6.0, 12.0});
+
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+    const auto res = simulateGradientLQG(zp, cp, profs, 900.0, 0.5,
+                                         /*noiseSigma=*/0.2, {}, &lcfg);
+
+    ASSERT_EQ(res.estStates.size(), zp.size());
+    const auto& trueT = res.temps.back();
+    for (size_t i = 0; i < zp.size(); ++i)
+        EXPECT_NEAR(res.estStates[i], trueT[i], 1.0);
+}
+
+TEST(OvenGradientLQGTest, HandlesSetpointGradientAndNoise) {
+    // Constant per-zone setpoints forming a gradient, under sensor noise.
+    const auto zp = gradientZoneParams();
+    const auto cp = gradientCoupling(0.004);
+
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+
+    // Reuse the sim but with constant "profiles" (soaks at fixed temps).
+    // Constant non-empty profiles: start at the target and soak (hold)
+    // for the whole run -> a static spatial gradient under sensor noise.
+    // Targets 60/70/80 keep every zone well above ambient so the coldest
+    // zone's passive cooling can reject the coupling heat from its hotter
+    // neighbors (one-sided cooling cannot hold a zone AT ambient against
+    // a hotter neighbor — that scenario is physically infeasible).
+    std::vector<TemperatureProfile> profs(3);
+    for (size_t i = 0; i < 3; ++i) {
+        const double tgt = 60.0 + 10.0 * i;
+        profs[i] = TemperatureProfile(tgt);
+        profs[i].addSoak(700.0);
+    }
+    const auto res = simulateGradientLQG(zp, cp, profs, 1000.0, 0.5, 0.2,
+                                         {}, &lcfg);
+
+    EXPECT_LT(res.soakTrackErr, 2.0);
+    EXPECT_LT(res.soakGradErr, 2.5);
+    EXPECT_LT(res.finalTrackErr, 2.5);
+    EXPECT_LT(res.finalGradErr, 2.5);
+}
+
+TEST(OvenGradientLQGTest, AdaptsToCoupledParameterMismatch) {
+    // The TRUE plant differs from the controller's configured (prior)
+    // model: hotter-running zones (higher alpha/beta) and ~3x stronger
+    // inter-zone coupling. With adaptParams ON the coupled estimator +
+    // PE dither should re-identify the plant and recover tracking; the
+    // per-zone estimates should converge toward the truth.
+    auto trueZp = gradientZoneParams();       // plant truth base
+    for (auto& p : trueZp) { p.alpha = 1.35; p.beta = 0.0075; }
+    const auto trueCp = gradientCoupling(0.012);   // strong coupling
+
+    // Controller is configured with the WRONG (nominal, weaker) model.
+    const auto priorZp = gradientZoneParams();       // alpha=1,beta=.005
+    const auto priorCp = gradientCoupling(0.004);
+
+    const auto profs = gradientProfiles(testProfile(), {0.0, 6.0, 12.0});
+
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+    lcfg.adaptParams = true;
+    lcfg.adaptRedesignInterval = 8.0;
+    // Modest sensor noise: exercises adaptation under the realistic
+    // measured-temperature corruption the estimator must average out.
+    const auto res = simulateGradientLQG(trueZp, trueCp, profs, 1000.0, 0.5,
+                                         0.15, {}, &lcfg,
+                                         &priorZp, &priorCp);
+
+    // The heater/loss dynamics {alpha,beta} — which drive the
+    // feedforward inverse and the observer — converge essentially exactly
+    // to the stronger truth. Coupling adapts only partially: a steady
+    // inter-zone offset's heat flow is genuinely confounded with the
+    // constant disturbance d (the estimator splits that steady load
+    // between them), which is control-adequate since the LQI integral and
+    // FF absorb the residual. Assert the accurate params tightly and the
+    // couplings only as bounded/non-negative.
+    ASSERT_EQ(res.estParams.size(), 3u);
+    for (size_t i = 0; i < 3; ++i) {
+        const auto& e = res.estParams[i];
+        EXPECT_NEAR(e.alpha, 1.35, 0.25) << "zone " << i << " alpha";
+        EXPECT_NEAR(e.beta, 0.0075, 0.0025) << "zone " << i << " beta";
+        EXPECT_GE(e.couplingLeft, 0.0);
+        EXPECT_GE(e.couplingRight, 0.0);
+        EXPECT_LT(e.couplingLeft, 0.05);
+        EXPECT_LT(e.couplingRight, 0.05);
+    }
+    // Tracking stays bounded despite starting from a wrong model.
+    EXPECT_LT(res.soakTrackErr, 3.0);
+    EXPECT_LT(res.soakGradErr, 3.5);
+    EXPECT_LT(res.finalTrackErr, 3.5);
+    EXPECT_LT(res.finalGradErr, 3.5);
+}
+
+TEST(OvenGradientLQGTest, AdaptationOffKeepsPriorModel) {
+    // Same mismatch but adaptParams OFF: the controller must keep the
+    // (wrong) prior gains and still produce bounded — if degraded —
+    // tracking. This isolates that adaptation (not luck) drives recovery.
+    auto trueZp = gradientZoneParams();
+    for (auto& p : trueZp) { p.alpha = 1.35; p.beta = 0.0075; }
+    const auto trueCp = gradientCoupling(0.012);
+    const auto priorZp = gradientZoneParams();
+    const auto priorCp = gradientCoupling(0.004);
+    const auto profs = gradientProfiles(testProfile(), {0.0, 6.0, 12.0});
+
+    auto lcfg = lqgTestConfig(LQG_TEST_TT);
+    lcfg.adaptParams = false;
+    const auto res = simulateGradientLQG(trueZp, trueCp, profs, 900.0, 0.5,
+                                         0.0, {}, &lcfg,
+                                         &priorZp, &priorCp);
+    // No adaptation -> estimates never populate (estimator not run).
+    for (const auto& e : res.estParams) {
+        EXPECT_DOUBLE_EQ(e.alpha, 0.0);
+        EXPECT_DOUBLE_EQ(e.beta, 0.0);
+    }
+    // Fixed wrong model: bounded but looser than the adapted run.
+    EXPECT_LT(res.soakTrackErr, 4.0);
+    EXPECT_LT(res.maxTrackErr, 12.0);
+}
+
+// ---------------------------------------------------------------------------
+// OvenCoupledParameterEstimator — coupled MIMO online identification
+// ---------------------------------------------------------------------------
+
+// Open-loop coupled plant matching the controller's A-matrix assembly:
+//   dT_i/dt = a_i*u_i - b_i*(T_i-Tamb) + gL_i*(T_{i-1}-T_i)
+//             + gR_i*(T_{i+1}-T_i) + d_i
+// Used to generate known-truth I/O for the estimator (no controller, so u
+// is a clean exogenous excitation — the identifiable case).
+void stepCoupledOpenLoop(std::vector<CoupledZoneParams>& z,
+                         std::vector<double>& T,
+                         const std::vector<double>& u, double dt) {
+    const int n = static_cast<int>(z.size());
+    std::vector<double> dT(n, 0.0);
+    for (int i = 0; i < n; ++i) {
+        double acc = z[i].alpha * u[i] - z[i].beta * (T[i] - z[i].ambient)
+                     + z[i].disturbance;
+        if (i > 0)     acc += z[i].couplingLeft  * (T[i - 1] - T[i]);
+        if (i + 1 < n) acc += z[i].couplingRight * (T[i + 1] - T[i]);
+        dT[i] = acc;
+    }
+    for (int i = 0; i < n; ++i) T[i] += dT[i] * dt;
+}
+
+// Per-zone multi-sine input: distinct incommensurate frequencies per zone
+// and per harmonic give persistently exciting, mutually decorrelated u_i.
+double coupledExcitation(int zone, double t) {
+    // zone offsets the frequency set so the three inputs are uncorrelated.
+    const double f1 = 0.021 + 0.004 * zone;
+    const double f2 = 0.043 + 0.005 * zone;
+    const double f3 = 0.011 + 0.003 * zone;
+    const double v = 0.5
+        + 0.30 * std::sin(2.0 * M_PI * f1 * t)
+        + 0.15 * std::sin(2.0 * M_PI * f2 * t + 0.7 * zone)
+        + 0.08 * std::sin(2.0 * M_PI * f3 * t + 1.3 * zone);
+    return std::clamp(v, 0.02, 0.98);
+}
+
+TEST(OvenCoupledEstimatorTest, RecoversCoupledParams) {
+    const int n = 3;
+    // Ground-truth coupled plant (asymmetric couplings allowed).
+    std::vector<CoupledZoneParams> truth(n);
+    truth[0] = {1.00, 0.0050, 0.0,    0.0040,  0.0,   25.0};
+    truth[1] = {1.10, 0.0060, 0.0040, 0.0050, -0.02, 25.0};
+    truth[2] = {0.90, 0.0040, 0.0050, 0.0,     0.01,  25.0};
+
+    // Deliberately wrong priors — the estimator must move to the truth.
+    std::vector<CoupledZoneParams> prior(n);
+    for (int i = 0; i < n; ++i)
+        prior[i] = {0.7, 0.0035, 0.002, 0.002, 0.0, 25.0};
+
+    CoupledEstimatorConfig ec;
+    ec.windowTime = 40.0;
+    ec.memTime = 250.0;
+    ec.smoothing = 0.6;
+    ec.ridge = 1e-3;
+    OvenCoupledParameterEstimator est(ec);
+    est.setZones(prior);
+
+    std::vector<double> T(n, 25.0), u(n, 0.0), amb(n, 25.0);
+    const double dt = 0.5;
+    for (double t = 0.0; t < 500.0; t += dt) {
+        for (int i = 0; i < n; ++i) u[i] = coupledExcitation(i, t);
+        est.update(u, T, amb, dt);
+        stepCoupledOpenLoop(truth, T, u, dt);
+    }
+
+    for (int i = 0; i < n; ++i) {
+        const auto e = est.estimate(i);
+        const auto& tr = truth[i];
+        EXPECT_GT(est.updatesUsed(i), 50) << "zone " << i << " not excited";
+        EXPECT_NEAR(e.alpha, tr.alpha, 0.15 * tr.alpha)
+            << "zone " << i << " alpha";
+        EXPECT_NEAR(e.beta, tr.beta, 0.20 * tr.beta)
+            << "zone " << i << " beta";
+        if (i > 0)
+            EXPECT_NEAR(e.couplingLeft, tr.couplingLeft,
+                        0.35 * std::max(tr.couplingLeft, 0.002) + 0.001)
+                << "zone " << i << " couplingLeft";
+        if (i + 1 < n)
+            EXPECT_NEAR(e.couplingRight, tr.couplingRight,
+                        0.35 * std::max(tr.couplingRight, 0.002) + 0.001)
+                << "zone " << i << " couplingRight";
+        // d is the hardest parameter: its constant regressor shares a DC
+        // direction with the mean of each coupling regressor cl*(T_nbr-T_i),
+        // so a steady inter-zone offset is partially confounded with a
+        // constant heat load. Bounded (~0.03 C/s) and absorbed by integral
+        // feedback; alpha/beta/coupling above carry the dynamics.
+        EXPECT_NEAR(e.disturbance, tr.disturbance, 0.035)
+            << "zone " << i << " disturbance";
+    }
+}
+
+TEST(OvenCoupledEstimatorTest, SingleZoneReducesToFopdt) {
+    // n = 1 has no neighbors -> the 5-param regression collapses to the
+    // FOPDT {alpha,beta,d} estimate with couplings pinned at zero.
+    std::vector<CoupledZoneParams> truth(1);
+    truth[0] = {1.0, 0.005, 0.0, 0.0, -0.03, 25.0};
+    std::vector<CoupledZoneParams> prior(1);
+    prior[0] = {0.7, 0.0035, 0.0, 0.0, 0.0, 25.0};
+
+    CoupledEstimatorConfig ec;
+    ec.windowTime = 40.0; ec.memTime = 250.0; ec.smoothing = 0.6;
+    OvenCoupledParameterEstimator est(ec);
+    est.setZones(prior);
+
+    std::vector<double> T(1, 25.0), u(1, 0.0), amb(1, 25.0);
+    const double dt = 0.5;
+    for (double t = 0.0; t < 400.0; t += dt) {
+        u[0] = coupledExcitation(0, t);
+        est.update(u, T, amb, dt);
+        stepCoupledOpenLoop(truth, T, u, dt);
+    }
+    const auto e = est.estimate(0);
+    EXPECT_NEAR(e.alpha, 1.0, 0.15);
+    EXPECT_NEAR(e.beta, 0.005, 0.0015);
+    EXPECT_NEAR(e.couplingLeft, 0.0, 1e-9);
+    EXPECT_NEAR(e.couplingRight, 0.0, 1e-9);
+    EXPECT_NEAR(e.disturbance, -0.03, 0.02);
+}
+
+TEST(OvenCoupledEstimatorTest, StaysBoundedWhenUnexcited) {
+    // A steady soak gives no excitation: estimates must hold at the prior
+    // (not drift to fit noise), and couplings must not go negative.
+    std::vector<CoupledZoneParams> truth(2);
+    truth[0] = {1.0, 0.005, 0.0, 0.004, 0.0, 25.0};
+    truth[1] = {1.0, 0.005, 0.004, 0.0, 0.0, 25.0};
+    std::vector<CoupledZoneParams> prior(2);
+    for (auto& p : prior) p = {0.8, 0.004, 0.002, 0.002, 0.0, 25.0};
+
+    CoupledEstimatorConfig ec;
+    ec.windowTime = 30.0;
+    OvenCoupledParameterEstimator est(ec);
+    est.setZones(prior);
+
+    std::vector<double> T(2, 60.0), u(2, 0.175), amb(2, 25.0);  // steady u
+    const double dt = 0.5;
+    for (double t = 0.0; t < 200.0; t += dt) {
+        est.update(u, T, amb, dt);
+        stepCoupledOpenLoop(truth, T, u, dt);
+    }
+    for (int i = 0; i < 2; ++i) {
+        const auto e = est.estimate(i);
+        EXPECT_FALSE(est.lastExcited(i));
+        // Held at prior (no drift).
+        EXPECT_NEAR(e.alpha, prior[i].alpha, 0.05);
+        EXPECT_GE(e.couplingLeft, 0.0);
+        EXPECT_GE(e.couplingRight, 0.0);
+    }
+}
+

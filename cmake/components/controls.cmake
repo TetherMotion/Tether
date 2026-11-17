@@ -43,6 +43,10 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/thermal/OvenLQIBackend.cpp
     # Multi-zone temperature-gradient supervisory layer
     ${TETHER_ROOT}/src/control/thermal/OvenGradientController.cpp
+    # Centralized MIMO LQG gradient controller (coupled-zone state feedback)
+    ${TETHER_ROOT}/src/control/thermal/OvenGradientLQGController.cpp
+    # Coupled MIMO physical-parameter estimator (per-zone integral regression)
+    ${TETHER_ROOT}/src/control/thermal/OvenCoupledParameterEstimator.cpp
     # Industrial curve presets + process-window validation
     ${TETHER_ROOT}/src/control/thermal/ThermalCurve.cpp
 )
