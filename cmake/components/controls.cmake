@@ -31,6 +31,8 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/extrusion/FlowRateAnalyzer.cpp
     # Generic oven thermal control (physical-parameter profile tracking)
     ${TETHER_ROOT}/src/control/thermal/OvenThermalModel.cpp
+    ${TETHER_ROOT}/src/control/thermal/OvenSOPDTModel.cpp
+    ${TETHER_ROOT}/src/control/thermal/SOPDTParameterEstimator.cpp
     ${TETHER_ROOT}/src/control/thermal/TemperatureProfile.cpp
     ${TETHER_ROOT}/src/control/thermal/ActuationGovernor.cpp
     ${TETHER_ROOT}/src/control/thermal/ThermalParameterEstimator.cpp

@@ -52,7 +52,9 @@
 #include "tether/control/thermal/OvenAutotune.hpp"
 #include "tether/control/thermal/OvenCoupledModel.hpp"
 #include "tether/control/thermal/OvenLQIBackend.hpp"
+#include "tether/control/thermal/OvenSOPDTModel.hpp"
 #include "tether/control/thermal/OvenThermalModel.hpp"
+#include "tether/control/thermal/SOPDTParameterEstimator.hpp"
 #include "tether/control/thermal/TemperatureProfile.hpp"
 #include "tether/control/thermal/ThermalParameterEstimator.hpp"
 
@@ -68,10 +70,51 @@ enum class OvenFeedbackBackendKind {
                sensing (estimates product-zone temperature) */
 };
 
+/**@brief Plant model order — user-selected, never inferred. */
+enum class OvenModelOrder {
+    Fopdt,  /**< Single lossy thermal mass (default, backward compatible) */
+    Sopdt   /**< Cascade: lossy stage-1 mass + pure-lag stage-2 mass */
+};
+
+/**@brief Feedforward method — user-selected. */
+enum class OvenFeedforwardMethod {
+    ModelInverse,  /**< Exact model-inverse of the active model order.
+                        FOPDT: analytic inverse. SOPDT: two-stage inverse
+                        using reference acceleration (exact on ramp/soak
+                        profiles; finite-difference r̈ at knots). */
+    DominantLag,   /**< Quasi-static FOPDT-equivalent inverse — ignores
+                        the τ2 compensation term. Simpler, slightly more
+                        lag; identical to ModelInverse for FOPDT. */
+    None           /**< No feedforward; feedback only. */
+};
+
+/**@brief Online parameter estimator — user-selected. */
+enum class OvenEstimateMethod {
+    FopdtIntegral, /**< Windowed integral regression → {α,β,d}.
+                        With modelOrder=Sopdt this is a projection: it
+                        updates stage-1 {α,β,d} and holds τ2 fixed. */
+    SopdtOe,      /**< Trust-region output-error fit → {α,β,τ2,d}.
+                        Simulates the exact cascade over the window and
+                        solves {α,d} linearly for each lag candidate;
+                        needs richer excitation than FopdtIntegral. */
+    Off            /**< No online estimation (same as adaptParams=false). */
+};
+
 /**@brief Configuration for OvenController. */
 struct OvenControllerConfig {
     // --- Plant model (nominal/initial physical parameters) ---
     OvenModelParams model;
+
+    // --- Model order & method selection (user has full control) ---
+    OvenModelOrder modelOrder{OvenModelOrder::Fopdt};
+    OvenModelParamsSOPDT modelSopdt;   /**< Used when modelOrder=Sopdt.
+        Build from a FOPDT set via
+        `OvenModelParamsSOPDT::fromFopdtParams(model, tau2)` — only τ2
+        is genuinely new; stage-1 params mirror `model`. */
+    OvenFeedforwardMethod ffMethod{OvenFeedforwardMethod::ModelInverse};
+    OvenEstimateMethod estimateMethod{OvenEstimateMethod::FopdtIntegral};
+    OvenTuneMethod tuneMethod{OvenTuneMethod::Simc};
+    SOPDTEstimatorConfig sopdtEstimator; /**< OE estimator tuning */
 
     // --- Subsystem configs ---
     GovernorConfig governor;
@@ -95,9 +138,17 @@ struct OvenControllerConfig {
     double backendDt{0.5};          /**< Observer/LQI design step [s] */
 
     // --- Feedback PI ---
-    double kp{0.0};           /**< PI proportional gain; 0 = auto (SIMC) */
-    double ki{0.0};           /**< PI integral gain;     0 = auto (SIMC) */
-    double simcTauC{0.0};     /**< SIMC closed-loop τc [s]; <=0 → τc = θ */
+    double kp{0.0};           /**< PI proportional gain; 0 = auto (tuneMethod)
+                                   For tuneMethod=Manual: used verbatim. */
+    double ki{0.0};           /**< PI integral gain;     0 = auto (tuneMethod)
+                                   For tuneMethod=Manual: used verbatim. */
+    double kd{0.0};           /**< Derivative gain (PID backends / Manual /
+                                   SIMC-SOPDT / IMC-PID). 0 = auto per
+                                   tuneMethod; Manual uses it verbatim. */
+    double simcTauC{0.0};     /**< SIMC/IMC closed-loop λ [s]; <=0 → λ = θ */
+    double sopdtFFAccelWindow{4.0}; /**< Half-width [s] of the finite-
+        difference window used to estimate r̈ for the exact SOPDT
+        feedforward at profile knots. Larger = softer FF kicks. */
     double antiWindupTt{0.0}; /**< Back-calc tracking τ [s]; <=0 → auto */
     double integralLimit{10.0}; /**< |I-term| bound [u] */
 
@@ -132,11 +183,17 @@ struct OvenControllerStatus {
     double feedback{0.0};
     double output{0.0};
     double alpha{0.0}, beta{0.0}, disturbance{0.0};
+    double tau2{0.0};           /**< SOPDT stage-2 lag [s]; 0 in FOPDT mode */
     int windowsUsed{0};
     bool saturated{false};
     bool overTemp{false};
     bool adapting{false};
     const char* backendName{nullptr}; /**< Active feedback backend id */
+    // Active method selections (inspectable — mirrors config)
+    OvenModelOrder modelOrder{OvenModelOrder::Fopdt};
+    OvenFeedforwardMethod ffMethod{OvenFeedforwardMethod::ModelInverse};
+    OvenEstimateMethod estimateMethod{OvenEstimateMethod::FopdtIntegral};
+    OvenTuneMethod tuneMethod{OvenTuneMethod::Simc};
 };
 
 class OvenController : public ControllerBase {
@@ -178,11 +235,23 @@ public:
      *        neighbor temperatures. */
     void setCouplingDisturbance(double d);
 
-    /**@brief Force (re)estimation prior — e.g. after commissioning autotune. */
+    /**@brief Force (re)estimation prior — e.g. after commissioning autotune.
+     *        Applies to the ACTIVE model order: with modelOrder=Sopdt the
+     *        FOPDT params are projected onto the cascade keeping the
+     *        current τ2 (see OvenModelParamsSOPDT::fromFopdtParams). */
     void setModelParams(const OvenModelParams& params);
+
+    /**@brief SOPDT variant of setModelParams. With modelOrder=Fopdt the
+     *        params are projected onto the FOPDT model via
+     *        OvenModelParamsSOPDT::toFopdtParams() (dominant-lag
+     *        approximation). */
+    void setModelParamsSOPDT(const OvenModelParamsSOPDT& params);
 
     /**@brief Apply an autotune result: model params + PI gains. */
     void applyAutotune(const OvenAutotuneResult& result);
+
+    /**@brief SOPDT variant: cascade params + {kp,ki,kd} gains. */
+    void applyAutotuneSOPDT(const OvenAutotuneResultSOPDT& result);
 
     /**
      * @brief Install a custom feedback backend at runtime.
@@ -215,17 +284,29 @@ protected:
 private:
     void updateModelFromEstimator();
     void maybeRetune();
-    void applyPiGains(double kp, double ki);
+    void applyPiGains(double kp, double ki, double kd = 0.0);
     void installBackend(OvenFeedbackBackendKind kind);
     double delayedInput(double t) const;
     void pushInput(double t, double u);
+    bool isSopdt() const { return m_cfg.modelOrder == OvenModelOrder::Sopdt; }
+    int estUpdatesUsed() const;
+    /**@brief Snapshot the active estimator's current outputs into the
+     *        retune-baseline bookkeeping (m_lastAlpha/Beta/Tau2). Call
+     *        after any setPrior()/setModelParams*() so the meaningful-
+     *        change gate compares like with like. */
+    void syncRetuneBaseline();
+    /**@brief Design feedback gains for the configured tuneMethod from
+     *        the current parameter estimates. */
+    void designGains(double& kp, double& ki, double& kd) const;
 
     OvenControllerConfig m_cfg;
     TemperatureProfile m_profile;
     bool m_hasProfile{false};
 
     OvenThermalModel m_model;
+    OvenThermalModelSOPDT m_modelSopdt;
     ThermalParameterEstimator m_est;
+    SOPDTParameterEstimator m_estSopdt;
     ActuationGovernor m_gov;
 
     // Feedback backend: polymorphic ControllerBase — one virtual call per
@@ -250,8 +331,8 @@ private:
     // Retune bookkeeping
     double m_lastRetuneTime{-1e9};
     int m_lastRetuneWindows{0};
-    double m_lastKp{0.0}, m_lastKi{0.0};
-    double m_lastAlpha{0.0}, m_lastBeta{0.0};
+    double m_lastKp{0.0}, m_lastKi{0.0}, m_lastKd{0.0};
+    double m_lastAlpha{0.0}, m_lastBeta{0.0}, m_lastTau2{0.0};
     double m_lastUfb{0.0};
 
     // Exogenous (coupling) disturbance injection — see

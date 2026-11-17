@@ -19,7 +19,9 @@
 #include "tether/control/thermal/OvenController.hpp"
 #include "tether/control/thermal/OvenCoupledModel.hpp"
 #include "tether/control/thermal/OvenLQIBackend.hpp"
+#include "tether/control/thermal/OvenSOPDTModel.hpp"
 #include "tether/control/thermal/OvenThermalModel.hpp"
+#include "tether/control/thermal/SOPDTParameterEstimator.hpp"
 #include "tether/control/thermal/TemperatureProfile.hpp"
 #include "tether/control/thermal/ThermalParameterEstimator.hpp"
 
@@ -748,4 +750,299 @@ TEST(OvenControllerTest, BackendSwapAtRuntime) {
 
     // After the swap the product must still converge to the profile soak.
     EXPECT_NEAR(plant.tp, 90.0, 4.0);
+}
+
+// ---------------------------------------------------------------------------
+// SOPDT cascade model
+// ---------------------------------------------------------------------------
+
+// SOPDT plant: stage-1 lossy mass {alpha=1.0, beta=0.005 -> tau1=200,
+// K=200}, stage-2 pure lag tau2=300, delay=4. Effective dominant lag
+// tau1+tau2 = 500 s.
+OvenModelParamsSOPDT sopdtPlantParams() {
+    OvenModelParamsSOPDT p;
+    p.alpha = 1.0;
+    p.beta = 0.005;
+    p.tau2 = 300.0;
+    p.delay = 4.0;
+    p.disturbance = 0.0;
+    p.ambient = 25.0;
+    p.uMin = 0.0;
+    p.uMax = 1.0;
+    return p;
+}
+
+TEST(OvenSOPDTModelTest, StepResponseMatchesAnalytic) {
+    // Constant input u: the cascade reaches steady state
+    // T = Tamb + K*u with K = alpha/beta = 200.
+    const auto p = sopdtPlantParams();
+    OvenThermalModelSOPDT m(p);
+    m.reset();
+    const double dt = 0.5;
+    for (int i = 0; i < 4000; ++i) m.step(0.4, dt);   // 2000 s >> tau_tot
+    EXPECT_NEAR(m.temperature(), 25.0 + 200.0 * 0.4, 1.0);
+}
+
+TEST(OvenSOPDTModelTest, Tau2ZeroRecoversFopdt) {
+    // tau2 -> 0 must collapse to the single-mass FOPDT response.
+    auto p = sopdtPlantParams();
+    p.tau2 = 1e-6;
+    OvenThermalModelSOPDT ms(p);
+    ms.reset();
+    OvenModelParams f;
+    f.alpha = p.alpha; f.beta = p.beta; f.delay = p.delay;
+    f.disturbance = 0.0; f.ambient = p.ambient; f.uMin = 0; f.uMax = 1;
+    OvenThermalModel mf(f);
+    mf.reset();
+    const double dt = 0.5;
+    for (int i = 0; i < 800; ++i) {
+        const double us = ms.step(0.5, dt);
+        const double uf = mf.step(0.5, dt);
+        EXPECT_NEAR(us, uf, 1e-6);
+    }
+}
+
+TEST(OvenSOPDTModelTest, ExactInverseTracksRamp) {
+    // Open-loop: feed the exact model-inverse FF for a ramp and check the
+    // output tracks the reference once the stage-1 state has converged
+    // onto the required trajectory (e^{-t/tau1} transient ~ 3*tau1).
+    const auto p = sopdtPlantParams();
+    OvenThermalModelSOPDT m(p);
+    m.reset();
+    const double dt = 0.5;
+    const double rate = 0.1;                    // C/s ramp (keeps u<1)
+    const double tEnd = 1400.0;
+    double maxErr = 0.0;
+    for (double t = 0.0; t < tEnd; t += dt) {
+        const double r = 25.0 + rate * t;
+        const double u = m.requiredInputClamped(r, rate, 0.0, 25.0, 0.0);
+        m.step(u, dt);
+        if (t > tEnd - 200.0)                  // converged tail only
+            maxErr = std::max(maxErr, std::abs(m.temperature() - r));
+    }
+    EXPECT_LT(maxErr, 2.5);
+}
+
+// ---------------------------------------------------------------------------
+// SOPDT parameter estimator (output-error fit)
+// ---------------------------------------------------------------------------
+
+TEST(SOPDTParameterEstimatorTest, OpenLoopConvergence) {
+    const auto p = sopdtPlantParams();
+    OvenThermalModelSOPDT plant(p);
+    plant.reset();
+
+    SOPDTEstimatorConfig ec;
+    // windowTime is floored at windowLagFactor·(τ1+τ2) ≈ 4·500 = 2000 s —
+    // the scored window must span several slowest-lag constants for the
+    // two-lag split to be identifiable.
+    ec.windowTime = 300.0;
+    ec.windowLagFactor = 4.0;
+    ec.spinupFactor = 4.0;
+    ec.fitInterval = 15.0;
+    ec.simStride = 2.0;
+    ec.gridSize = 9;
+    ec.smoothing = 0.4;
+    SOPDTParameterEstimator est(ec);
+    // Perturbed prior: estimator must move toward the truth.
+    est.setPrior(0.8, 0.006, 200.0, 0.0);
+
+    std::deque<std::pair<double, double>> hist;
+    const double dt = 0.5, delay = p.delay;
+    for (int i = 0; i < 12000; ++i) {         // 6000 s
+        const double t = i * dt;
+        double u = 0.4 + 0.3 * std::sin(2.0 * 3.14159265 * t / 47.0)
+                  + 0.15 * std::sin(2.0 * 3.14159265 * t / 13.0)
+                  + 0.10 * std::copysign(1.0, std::sin(2.0 * 3.14159265 * t / 29.0));
+        u = std::clamp(u, 0.0, 1.0);
+        hist.emplace_back(t, u);
+        while (hist.size() > 100 && t - hist.front().first > delay + 1.0)
+            hist.pop_front();
+        double uD = 0.0;
+        for (auto& [ti, ui] : hist)
+            if (ti <= t - delay) uD = ui;
+        // Same convention the controller uses: T at the START of the
+        // interval, uDelayed driving [t, t+dt].
+        const double Tnow = plant.temperature();
+        plant.step(u, dt);
+        est.update(uD, Tnow, 25.0, dt);
+    }
+
+    EXPECT_GT(est.updatesUsed(), 5);
+    // The SOPDT I/O transfer K/((τ1s+1)(τ2s+1)) is symmetric in the two
+    // lags, so the {τ1,τ2} *labeling* is unidentifiable from a single
+    // output — what the OE fit must recover is the DC gain K and the
+    // lag set (either order). Assert those, plus a bounded disturbance.
+    const double Ktrue = p.alpha / p.beta;         // 200
+    EXPECT_NEAR(est.gain(), Ktrue, 0.30 * Ktrue);
+    double lags[2] = {est.tau1(), est.tau2()};
+    double truth[2] = {1.0 / p.beta, p.tau2};      // {200, 300}
+    std::sort(lags, lags + 2);
+    std::sort(truth, truth + 2);
+    EXPECT_NEAR(lags[0], truth[0], 0.45 * truth[0]);
+    EXPECT_NEAR(lags[1], truth[1], 0.45 * truth[1]);
+    EXPECT_NEAR(est.disturbance(), 0.0, 0.2);
+}
+
+TEST(SOPDTParameterEstimatorTest, HoldsDuringUnexcitedSoak) {
+    SOPDTParameterEstimator est;
+    est.setPrior(1.0, 0.005, 300.0, 0.0);
+    std::mt19937 rng(7);
+    std::normal_distribution<double> noise(0.0, 0.1);
+    for (int i = 0; i < 4000; ++i) {
+        est.update(0.4, 80.0 + noise(rng), 25.0, 0.5);
+    }
+    EXPECT_DOUBLE_EQ(est.alpha(), 1.0);
+    EXPECT_DOUBLE_EQ(est.beta(), 0.005);
+    EXPECT_DOUBLE_EQ(est.tau2(), 300.0);
+    EXPECT_EQ(est.updatesUsed(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// SOPDT autotune
+// ---------------------------------------------------------------------------
+
+TEST(OvenAutotuneTest, IdentifiesSopdtStepResponse) {
+    const auto p = sopdtPlantParams();
+    OvenThermalModelSOPDT plant(p);
+    plant.reset();
+    const double dt = 1.0;
+    const int steps = 3000;                    // ~6 tau_tot
+    const auto traj = plant.simulate(0.4, dt, steps, 25.0, 0.0);
+
+    StepResponseData data;
+    data.uStep = 0.4;
+    data.tAmb = 25.0;
+    data.uMin = 0.0;
+    data.uMax = 1.0;
+    for (int i = 0; i <= steps; ++i) {
+        data.time.push_back(i * dt);
+        data.temp.push_back(traj[i]);
+    }
+
+    const auto result = autoTuneOvenSOPDT(data);
+    ASSERT_TRUE(result.success);
+    // Effective gain K = alpha/beta = 200; dominant lag ~ tau1+tau2 = 500.
+    EXPECT_NEAR(result.params.gain(), 200.0, 40.0);
+    EXPECT_GT(result.params.tau2, 20.0);        // second lag found
+    EXPECT_GT(result.kp, 0.0);
+    EXPECT_GT(result.ki, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// OvenController — SOPDT end-to-end
+// ---------------------------------------------------------------------------
+
+// Closed-loop sim against the SOPDT plant (mirrors simulate() but with
+// OvenThermalModelSOPDT as the true plant).
+SimResult simulateSopdt(OvenModelParamsSOPDT plantP,
+                        const OvenControllerConfig& ctrlCfg,
+                        const TemperatureProfile& profile,
+                        double duration, double dt = 0.5,
+                        double noiseSigma = 0.0,
+                        const std::function<double(double)>& disturbanceFn = {}) {
+    OvenThermalModelSOPDT plant(plantP);
+    plant.reset();
+
+    OvenController ctrl(ctrlCfg);
+    ctrl.setProfile(profile);
+
+    std::mt19937 rng(42);
+    std::normal_distribution<double> noise(0.0, noiseSigma);
+
+    SimResult res;
+    ControllerInput in;
+    in.dt = dt;
+    in.reference = 25.0;
+
+    for (double t = 0.0; t < duration; t += dt) {
+        if (disturbanceFn) plant.params().disturbance = disturbanceFn(t);
+        in.measured = plant.temperature() + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+        const ControllerOutput out = ctrl.compute(in);
+        plant.step(out.control, dt);
+
+        const auto st = ctrl.status();
+        SimSample s{t, plant.temperature(), st.reference, out.control,
+                    out.feedforward, out.control - out.feedforward};
+        res.samples.push_back(s);
+        const double err = std::abs(s.temp - s.ref);
+        res.maxAbsErr = std::max(res.maxAbsErr, err);
+    }
+
+    double sum = 0.0;
+    int n = 0;
+    for (const auto& s : res.samples) {
+        if (s.t > duration - 120.0) {
+            sum += std::abs(s.temp - s.ref);
+            ++n;
+        }
+    }
+    res.soakErr = n ? sum / n : 0.0;
+    res.finalErr = res.samples.empty() ? 0.0
+                     : std::abs(res.samples.back().temp - res.samples.back().ref);
+    res.lastStatus = ctrl.status();
+    return res;
+}
+
+TEST(OvenControllerTest, SopdtTracksRampAndSoak) {
+    const auto plantP = sopdtPlantParams();
+    OvenControllerConfig cfg;
+    cfg.modelOrder = OvenModelOrder::Sopdt;
+    cfg.modelSopdt = plantP;                    // perfect model knowledge
+    cfg.model = plantP.toFopdtParams();         // FOPDT projection for governor init
+    cfg.adaptParams = false;
+    cfg.sensorTau = 5.0;
+
+    // Gentler, longer profile: the SOPDT plant is slow (tau_tot ~ 500 s)
+    // and stage 1 runs far ahead of the output on ramps, so settling
+    // after each maneuver takes several hundred seconds.
+    TemperatureProfile prof(25.0);
+    prof.addRampSoak(80.0, 0.12, 400.0);
+    prof.addRampSoak(55.0, 0.12, 300.0);
+
+    const auto res = simulateSopdt(plantP, cfg, prof, 2000.0, 0.5);
+    ASSERT_FALSE(res.samples.empty());
+    for (const auto& s : res.samples) {
+        ASSERT_TRUE(std::isfinite(s.u));
+        EXPECT_GE(s.u, -1e-9);
+        EXPECT_LE(s.u, 1.0 + 1e-9);
+    }
+    // Bounded tracking on a 500 s-lag cascade: the FF does the bulk work,
+    // feedback trims the residual — a few °C is expected, not <1.
+    EXPECT_LT(res.soakErr, 5.0);
+    EXPECT_LT(res.finalErr, 6.0);
+    EXPECT_EQ(res.lastStatus.modelOrder, OvenModelOrder::Sopdt);
+    EXPECT_GT(res.lastStatus.tau2, 50.0);
+}
+
+TEST(OvenControllerTest, SopdtStatusReportsMethods) {
+    const auto plantP = sopdtPlantParams();
+    OvenControllerConfig cfg;
+    cfg.modelOrder = OvenModelOrder::Sopdt;
+    cfg.modelSopdt = plantP;
+    cfg.ffMethod = OvenFeedforwardMethod::DominantLag;
+    cfg.estimateMethod = OvenEstimateMethod::SopdtOe;
+    cfg.tuneMethod = OvenTuneMethod::ImcPi;
+    cfg.adaptParams = false;
+
+    OvenThermalModelSOPDT plant(plantP);
+    plant.reset();
+    OvenController ctrl(cfg);
+    TemperatureProfile prof(25.0);
+    prof.addRampSoak(80.0, 0.2, 200.0);
+    ctrl.setProfile(prof);
+
+    ControllerInput in;
+    in.dt = 0.5;
+    in.reference = 25.0;
+    for (int i = 0; i < 200; ++i) {
+        in.measured = plant.temperature();
+        const auto out = ctrl.compute(in);
+        plant.step(out.control, 0.5);
+    }
+    const auto st = ctrl.status();
+    EXPECT_EQ(st.modelOrder, OvenModelOrder::Sopdt);
+    EXPECT_EQ(st.ffMethod, OvenFeedforwardMethod::DominantLag);
+    EXPECT_EQ(st.estimateMethod, OvenEstimateMethod::SopdtOe);
+    EXPECT_EQ(st.tuneMethod, OvenTuneMethod::ImcPi);
 }
