@@ -1,10 +1,10 @@
 /**
  * @file chat_tui.cpp
- * @brief Chat TUI for KICodegen — a devin-CLI-style conversation with the
+ * @brief Chat TUI for agent CLIs — a devin-CLI-style conversation with the
  *        generated code, built on tether_terminal_ui.
  *
- * Usage (spawned by `kicodegen chat`, or standalone):
- *   tether-chat <kicodegen-exe> <repo_root> <live_dir>
+ * Usage (spawned by the agent CLI's `chat` command, or standalone):
+ *   tether-chat <agent-exe> <repo_root> <live_dir>
  *
  * It forks `<exe> chat --rpc --repo <repo> --out <live>` and talks the
  * framed stdio protocol:  `KIND <len>\n<payload>`  both ways.
@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -34,7 +35,7 @@ namespace TUI = Tether::TUI;
 int main(int argc, char** argv) {
     if (argc < 4) {
         fprintf(stderr,
-            "usage: %s <kicodegen-exe> <repo_root> <live_dir>\n", argv[0]);
+            "usage: %s <agent-exe> <repo_root> <live_dir>\n", argv[0]);
         return 2;
     }
     const std::string exe = argv[1], repo = argv[2], live = argv[3];
@@ -59,7 +60,8 @@ int main(int argc, char** argv) {
         transcript.add(t, l);
     };
 
-    TUI::PanelScreen screen("kicodegen chat — " + live, TUI::PanelScreenHooks{
+    TUI::PanelScreen screen(std::filesystem::path(exe).filename().string() +
+            " chat — " + live, TUI::PanelScreenHooks{
         .onTick = [&] {
             for (auto& f : child.poll()) {
                 auto& kind = f.kind;

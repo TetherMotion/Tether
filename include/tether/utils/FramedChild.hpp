@@ -4,8 +4,8 @@
  * @file FramedChild.hpp
  * @brief Spawned child process speaking a tiny length-prefixed frame
  *        protocol over stdin/stdout pipes — the transport Tether TUIs
- *        use to drive headless tool backends (e.g. `kico --monitor`,
- *        `kicodegen chat --rpc`).
+ *        use to drive headless tool backends (e.g. an agent CLI's
+ *        `--monitor` or `chat --rpc` modes).
  *
  * Wire format (both directions):
  *   `<KIND> <payload-len>\n<payload-len raw bytes>`

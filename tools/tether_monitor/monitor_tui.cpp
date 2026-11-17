@@ -1,11 +1,11 @@
 /**
  * @file monitor_tui.cpp
- * @brief kico-monitor — ncurses progress UI for `kico` agent runs
- *        (generate/update/extract/test/review/generalize), built on
- *        tether_terminal_ui.
+ * @brief tether-monitor — ncurses progress UI for agent CLI runs
+ *        (generate/update/extract/test/review/generalize-style commands),
+ *        built on tether_terminal_ui.
  *
- * Usage (spawned automatically by `kico <cmd>` on a TTY, or standalone):
- *   kico-monitor <kico-exe> <kico-args...>
+ * Usage (spawned automatically by the agent CLI on a TTY, or standalone):
+ *   tether-monitor <agent-exe> <agent-args...>
  *
  * It forks `<exe> --monitor <args...>` and speaks the framed event
  * protocol:  `KIND <len>\n<payload>`  both ways.
@@ -30,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -90,8 +91,8 @@ struct AgentState {
 int main(int argc, char** argv) {
     if (argc < 3) {
         fprintf(stderr,
-            "usage: %s <kico-exe> <kico-args...>\n"
-            "  e.g. %s ./kico generate model.slx --out gen\n",
+            "usage: %s <agent-exe> <agent-args...>\n"
+            "  e.g. %s ./agent generate model.slx --out gen\n",
             argv[0], argv[0]);
         return 2;
     }
@@ -125,7 +126,8 @@ int main(int argc, char** argv) {
         }
     };
 
-    TUI::PanelScreen screen("kico — " + args[1] + " " +
+    TUI::PanelScreen screen(std::filesystem::path(exe).filename().string() +
+            " — " + args[1] + " " +
             (args.size() > 2 ? args.back() : ""), TUI::PanelScreenHooks{
         .onTick = [&] {
             ++tick;
