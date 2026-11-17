@@ -1645,21 +1645,31 @@ TEST_F(LexerTest, PositiveNumberWithPlusCoverage) {
 }
 
 TEST_F(LexerTest, ScientificNotationCoverage) {
-    // Lexer doesn't support scientific notation - it parses before the 'e'
+    // 'e' followed by [+-]?digit is an exponent marker
     auto tokens = tokenizeAll("X1e-3");
     EXPECT_FALSE(tokens.empty());
     if (!tokens.empty()) {
-        EXPECT_DOUBLE_EQ(tokens[0].value, 1.0);  // Just the "1" part
+        EXPECT_DOUBLE_EQ(tokens[0].value, 0.001);
     }
 }
 
 TEST_F(LexerTest, ScientificNotationUpperECoverage) {
-    // Lexer doesn't support scientific notation - parses only the number before E
     auto tokens = tokenizeAll("X1E3");
     EXPECT_FALSE(tokens.empty());
     if (!tokens.empty()) {
-        EXPECT_DOUBLE_EQ(tokens[0].value, 1.0);  // Just the "1" part, E3 becomes separate
+        EXPECT_DOUBLE_EQ(tokens[0].value, 1000.0);
     }
+}
+
+TEST_F(LexerTest, EWordNotSwallowedByExponentRule) {
+    // 'E' NOT followed by [+-]?digit stays the E word letter
+    // (extrusion axis) — e.g. "E.5" or "E-" with no digit.
+    auto tokens = tokenizeAll("X1.5E.5");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].letter, WordLetter::X);
+    EXPECT_DOUBLE_EQ(tokens[0].value, 1.5);
+    EXPECT_EQ(tokens[1].letter, WordLetter::E);
+    EXPECT_DOUBLE_EQ(tokens[1].value, 0.5);
 }
 
 TEST_F(LexerTest, LeadingDecimalPointCoverage) {

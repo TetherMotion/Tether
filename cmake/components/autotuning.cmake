@@ -54,7 +54,11 @@ foreach(_tgt IN LISTS _variants)
             ${TETHER_ROOT}/src
     )
 
-    target_link_libraries(${_tgt} PUBLIC tether_common)
+    # autotuning is NOT fully self-contained: MuSynthesis.cpp uses
+    # HInfinityController from tether_controls — without the dependency
+    # the shared lib carries undefined symbols (vtable) that only fail
+    # at runtime load under --as-needed.
+    target_link_libraries(${_tgt} PUBLIC tether_common tether_controls)
 
     set_target_properties(${_tgt} PROPERTIES
         POSITION_INDEPENDENT_CODE ON

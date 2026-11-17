@@ -52,7 +52,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    :maxdepth: 2
    :caption: Motion
 
-   OnlineTuner
+   LiveTune
    SnapSpaceVelocityProfiler
    motion/Architecture
    motion/GeometryFoundations
