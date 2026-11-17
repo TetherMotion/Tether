@@ -19,6 +19,7 @@
  * prompts — type + Enter, a bare number picks a numbered option.
  */
 #include "tether/utils/FramedChild.hpp"
+#include "tether/ui/SelectMenu.hpp"
 #include "tether/ui/TextLog.hpp"
 #include "tether/ui/Spinner.hpp"
 #include "tether/terminal_ui/PanelScreen.hpp"
@@ -29,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,8 +110,7 @@ int main(int argc, char** argv) {
     AgentState st;
     std::string input;
     bool awaiting = false;        // an ASK frame wants an ANSWER
-    std::vector<std::string> ask_opts;  // ASK options — arrow-key select
-    int ask_sel = 0;
+    std::optional<Tether::UI::SelectMenu> ask_menu;  // option questions
     uint64_t tick = 0;
 
     auto push = [&](const std::string& t, LogLevel l) {
@@ -191,11 +192,10 @@ int main(int argc, char** argv) {
                     auto v = splitLines(p);
                     flush_content();
                     if (!v.empty()) push("? " + v[0], LogLevel::Warn);
-                    ask_opts.assign(v.begin() + 1, v.end());
-                    ask_sel = 0;
-                    for (size_t i = 0; i < ask_opts.size(); ++i)
-                        push("    " + std::to_string(i + 1) + ". " +
-                             ask_opts[i], LogLevel::Info);
+                    ask_menu.reset();
+                    if (v.size() > 1)
+                        ask_menu.emplace(std::vector<std::string>(
+                            v.begin() + 1, v.end()));
                     awaiting = true;
                     input.clear();
                     st.busy = false;
@@ -236,8 +236,10 @@ int main(int argc, char** argv) {
             }
         },
         .renderBody = [&](int top, int bottom) {
-            // Body: [top, bottom-2) log, bottom-2 status, bottom-1 input.
-            int h = bottom - top - 2;
+            // Body: [top, bottom-2-menu_h) log, then the option menu
+            // block while one is open, bottom-2 status, bottom-1 input.
+            int menu_h = (awaiting && ask_menu) ? ask_menu->itemCount() : 0;
+            int h = bottom - top - 2 - menu_h;
             if (h > 0) {
                 int row = top;
                 for (const auto* lp : log.visible(h)) {
@@ -254,6 +256,30 @@ int main(int argc, char** argv) {
                     mvprintw(row, 1, "%s", lp->text.c_str());
                     if (pair != TUI::PalNone) attroff(COLOR_PAIR(pair));
                     ++row;
+                }
+            }
+
+            // Option menu block — live › highlight, sits above the
+            // status line while an ASK question is open.
+            if (awaiting && ask_menu) {
+                for (int i = 0; i < ask_menu->itemCount(); ++i) {
+                    int my = bottom - 2 - menu_h + i;
+                    if (my < top) continue;
+                    move(my, 0); clrtoeol();
+                    std::string lbl = ask_menu->rowLabel(i);
+                    if (int(lbl.size()) > COLS - 6)
+                        lbl = lbl.substr(0, size_t(COLS - 7)) + "…";
+                    if (i == ask_menu->cursor()) {
+                        attron(A_REVERSE | A_BOLD);
+                        mvprintw(my, 1, " › %s", lbl.c_str());
+                        attroff(A_REVERSE | A_BOLD);
+                    } else if (ask_menu->isCustomRow(i)) {
+                        attron(COLOR_PAIR(8));
+                        mvprintw(my, 3, "%s", lbl.c_str());
+                        attroff(COLOR_PAIR(8));
+                    } else {
+                        mvprintw(my, 3, "%s", lbl.c_str());
+                    }
                 }
             }
 
@@ -293,21 +319,19 @@ int main(int argc, char** argv) {
             if (y >= top) {
                 move(y, 0); clrtoeol();
                 if (awaiting) {
-                    attron(A_BOLD);
-                    mvprintw(y, 0, "answer>");
-                    attroff(A_BOLD);
-                    if (input.empty() && !ask_opts.empty()) {
-                        // Selector mode: ‹ N. option › — ↑/↓ cycles.
-                        std::string view = "‹ " +
-                            std::to_string(ask_sel + 1) + ". " +
-                            ask_opts[size_t(ask_sel)] + " ›";
-                        attron(A_REVERSE);
-                        mvprintw(y, 9, "%s", view.c_str());
-                        attroff(A_REVERSE);
-                        mvprintw(y, 11 + int(view.size()),
-                                 "(↑/↓ pick · Enter · type = custom)");
+                    if (ask_menu && !ask_menu->editingCustom()) {
+                        attron(COLOR_PAIR(8));
+                        mvprintw(y, 1,
+                                 "(↑/↓ move · Enter select · Esc skip · digits jump)");
+                        attroff(COLOR_PAIR(8));
                     } else {
-                        std::string view = input;
+                        attron(A_BOLD);
+                        mvprintw(y, 0, "answer>");
+                        attroff(A_BOLD);
+                        const std::string& buf =
+                            (ask_menu && ask_menu->editingCustom())
+                                ? ask_menu->customInput().buffer() : input;
+                        std::string view = buf;
                         int maxw = COLS - 10;
                         if (int(view.size()) > maxw)
                             view = "…" + view.substr(view.size() - size_t(maxw - 1));
@@ -323,32 +347,41 @@ int main(int argc, char** argv) {
         },
         .showLogView = false,
         .onKey = [&](int ch) -> bool {
+            // An open option menu is modal — every key goes to it.
+            if (awaiting && ask_menu) {
+                ask_menu->handleKey(ch);
+                if (!ask_menu->done()) return true;
+                std::string ans, shown;
+                if (ask_menu->cancelled()) {
+                    shown = "(skipped)";
+                } else if (ask_menu->selected() >= 0) {
+                    ans = std::to_string(ask_menu->selected() + 1);
+                    shown = ask_menu->answer();
+                } else {
+                    ans = shown = ask_menu->customText();
+                }
+                push("answer> " + shown, LogLevel::Warn);
+                child.sendFrame("ANSWER", ans);
+                ask_menu.reset();
+                awaiting = false;
+                return true;
+            }
             switch (ch) {
                 case '\n': case '\r': case KEY_ENTER:
                     if (awaiting) {
-                        std::string ans = input;
-                        if (ans.empty() && !ask_opts.empty())
-                            ans = std::to_string(ask_sel + 1);
-                        push("answer> " +
-                             (input.empty() && !ask_opts.empty()
-                                  ? ask_opts[size_t(ask_sel)] : ans),
-                             LogLevel::Warn);
-                        child.sendFrame("ANSWER", ans);
+                        push("answer> " + input, LogLevel::Warn);
+                        child.sendFrame("ANSWER", input);
                         input.clear();
-                        ask_opts.clear();
                         awaiting = false;
                     }
                     return true;
-                case KEY_UP:
-                    if (awaiting && input.empty() && !ask_opts.empty()) {
-                        ask_sel = (ask_sel + int(ask_opts.size()) - 1) %
-                                  int(ask_opts.size());
-                        return true;
-                    }
-                    return false;
-                case KEY_DOWN:
-                    if (awaiting && input.empty() && !ask_opts.empty()) {
-                        ask_sel = (ask_sel + 1) % int(ask_opts.size());
+                case 27:
+                    // Esc during a free-text question = skip, not quit.
+                    if (awaiting) {
+                        push("answer> (skipped)", LogLevel::Warn);
+                        child.sendFrame("ANSWER", "");
+                        input.clear();
+                        awaiting = false;
                         return true;
                     }
                     return false;
@@ -366,6 +399,10 @@ int main(int argc, char** argv) {
                     return false;
             }
         },
+        // While a question is open the menu/input owns every key —
+        // including digits, which the screen would otherwise treat as
+        // view switching.
+        .wantsKey = [&](int) -> bool { return awaiting; },
         .keyHints = "PgUp/PgDn: scroll   q: quit",
     });
 

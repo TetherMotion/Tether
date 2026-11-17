@@ -258,6 +258,12 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
                 vw.onKey(key))
                 continue;
         }
+        // Flat apps without views get the same claim at hooks level
+        // (e.g. a modal prompt needing digits that would otherwise
+        // switch views).
+        if (hooks_.wantsKey && hooks_.wantsKey(key) && hooks_.onKey &&
+            hooks_.onKey(key))
+            continue;
 
         // View switching: digits 1-9, F1-F12, Tab / Shift-Tab.
         if (key >= '1' && key <= '9') {

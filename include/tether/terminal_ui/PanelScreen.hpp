@@ -113,6 +113,16 @@ struct PanelScreenHooks {
     std::function<bool(int)> onKey;
 
     /**
+     * Pre-dispatch claim for flat apps without `views` — the
+     * hooks-level counterpart of PanelView::wantsKey.  Evaluated before
+     * the screen's own key handling (view digits, log scroll); when it
+     * returns true for a key, `onKey` sees the key first and an
+     * unhandled key still falls through.  Use state-conditionally
+     * (e.g. while a modal prompt is open) or it breaks navigation.
+     */
+    std::function<bool(int)> wantsKey;
+
+    /**
      * Optional modal guard: when set and it returns true, the quit keys
      * (q/Q/Esc) are passed to onKey instead of ending run().
      */
