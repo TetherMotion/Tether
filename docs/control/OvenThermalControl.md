@@ -818,6 +818,72 @@ one-sided cooling, a zone held *at* ambient cannot reject heat from a
 hotter neighbor — that setpoint combination is physically infeasible
 regardless of controller.
 
+## Why decentralized PI(D) loses to IMC/LQI on coupled gradients
+
+A note on naming first: the single-zone FOPDT path is *not* a bare PID
+loop — it is already internal-model control (model-inverse feedforward
++ SIMC/IMC-tuned PI). The real comparison in the gradient case is
+**decentralized SISO IMC-PI** (`OvenGradientController`, one
+`OvenController` per zone) versus **centralized MIMO LQG**
+(`OvenGradientLQGController`). On a coupled gradient plant the
+decentralized structure has four concrete disadvantages, none of which
+is a tuning problem:
+
+- **The gradient is never a controlled variable.** Each zone regulates
+  `T_i → r_i` independently; the spatial gradient `T_i − T_{i−1}` only
+  emerges as a byproduct. No term anywhere penalizes or feeds back on
+  gradient error, so when coupling and asymmetric loads push the actual
+  gradient off `offset_i − offset_{i−1}`, nothing corrects it directly —
+  each zone merely re-converges to its own absolute setpoint.
+- **Coupling is cancelled, not controlled.** `setCouplingDisturbance()`
+  injects the *measured* instantaneous heat `γ·(T_n − T_i)` into the
+  feedforward — reactive disturbance cancellation with one cycle of
+  latency. It cannot represent how zone *i*'s own input propagates
+  through `A` to heat or cool its neighbors, and it cannot anticipate a
+  neighbor's future trajectory.
+- **No spatial preview or coordination.** Each zone's `previewValue()`
+  looks only forward in *time* along its own profile. Nothing lets zone
+  *i* pre-position for what zone *i+1* will need (pre-heat a downstream
+  zone before a part arrives, or bleed a hot zone before it dumps into a
+  cold one). Conveyor `timeShiftS` is open-loop scheduling, not
+  closed-loop spatial coordination.
+- **Independent integrators leave a steady-state gradient offset.** Each
+  zone's integrator rejects only its own residual. Under a disturbance
+  that couples zones asymmetrically — a load in one zone, or a zone
+  pinned at its one-sided-cooling limit — the integrators wind to
+  different values and only the *absolute* errors are driven to zero.
+  The *difference* `T_i − T_{i−1}` has no dedicated correction path, so
+  gradient error persists precisely when it matters most.
+
+The centralized LQG removes all four at once. Coupling lives in `A`, so
+the feedback gain `Kx` is computed from the *coupled* dynamics —
+applying `u_i` is priced by how it moves every neighbor, which is
+anticipatory rather than reactive. The cost `Qx = qxZone·I +
+qxGradient·L` puts `z′Lz = Σ(z_i − z_{i−1})²` — the squared gradient
+tracking error — directly into the optimization, so the optimal law
+trades per-zone tracking against gradient uniformity explicitly. The
+observer and previewed feedforward run on the coupled state, keeping
+the internal model spatially consistent, and the online coupled
+estimator (`OvenCoupledParameterEstimator`) keeps that inverse model
+live — something the per-zone single-state estimators cannot do for a
+MIMO plant.
+
+The deeper point: for MIMO, *exact* model inversion `u = G⁻¹y_des` is
+often unstable or impossible — thermal coupling introduces
+non-minimum-phase zeros, so the inverse has unstable poles. LQG/LQI is
+the robust generalization of IMC to coupled plants: it achieves the
+same "invert the live model" objective *without* inverting, folding the
+inversion into a gain that is stabilizing by construction. That is why
+it is the recommended methodology here — not because PID is "aphysical,"
+but because decentralized SISO structurally cannot regulate a coupled
+spatial gradient, and centralized LQG can.
+
+**When decentralized PI(D) is still the right choice:** weakly-coupled
+zones, or conveyor-staggered *independent* profiles where each zone
+truly is its own SISO problem. There the coupling-as-disturbance
+approximation is adequate and the simpler per-zone stack is easier to
+commission and tune.
+
 ## Industrial temperature curves (`ThermalCurve`)
 
 `include/tether/control/thermal/ThermalCurve.hpp` provides the
