@@ -46,6 +46,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
 
    control/ControllerGuide
    control/AutotuningGuide
+   control/RobotPoseFromPath
 
 .. toctree::
    :maxdepth: 2
