@@ -1617,6 +1617,55 @@ if(TETHER_ENABLE_COVERAGE)
     endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Kinematics ↔ Pinocchio integration test (test-only dependency).
+# Finds pinocchio's CMake package; skipped silently when absent.
+# ---------------------------------------------------------------------------
+list(APPEND CMAKE_PREFIX_PATH /opt/openrobots)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/finders)
+# Pre-resolve pinocchio's transitive deps so the imported targets
+# (Boost::filesystem etc.) exist before its config validates interfaces.
+# Pre-resolve pinocchio's transitive deps. The Debian Boost CMake
+# configs don't materialize Boost::<component> targets under
+# find_dependency() in this layout, so declare them explicitly
+# (plain shared libraries — test-only requirement).
+foreach(_boost_comp filesystem serialization)
+    if(NOT TARGET Boost::${_boost_comp})
+        find_library(_boost_${_boost_comp}_LIB
+            NAMES boost_${_boost_comp}
+            PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib)
+        if(_boost_${_boost_comp}_LIB)
+            add_library(Boost::${_boost_comp} SHARED IMPORTED GLOBAL)
+            set_target_properties(Boost::${_boost_comp} PROPERTIES
+                IMPORTED_LOCATION "${_boost_${_boost_comp}_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "/usr/include")
+        endif()
+    endif()
+endforeach()
+find_package(pinocchio CONFIG QUIET)
+if(pinocchio_FOUND)
+    message(STATUS "  tests: pinocchio ${pinocchio_VERSION} found — "
+                   "kinematics integration test enabled")
+    tether_add_test_executable(tether_kinematics_pinocchio_tests
+        kinematics/test_kinematics_pinocchio.cpp
+    )
+    target_include_directories(tether_kinematics_pinocchio_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
+    target_link_libraries(tether_kinematics_pinocchio_tests PRIVATE
+        tether_kinematics
+        pinocchio::pinocchio
+        pinocchio::pinocchio_parsers
+        GTest::gtest_main
+    )
+    gtest_discover_tests(tether_kinematics_pinocchio_tests
+        PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120})
+else()
+    message(STATUS "  tests: pinocchio not found — kinematics "
+                   "integration test skipped")
+endif()
+
 # Build all configured test executables with `make tests` (or `ninja tests` / `cmake --build . --target tests`)
 get_property(TETHER_ALL_TEST_TARGETS GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS)
 add_custom_target(tests DEPENDS ${TETHER_ALL_TEST_TARGETS})
