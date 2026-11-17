@@ -4300,25 +4300,111 @@ public:
                             wr[i] = hiI;  // exclusive
                         }
                     }
+                    const auto flankSide = [&](int i, bool left) {
+                        double f = 0.0;
+                        if (left) {
+                            for (int k = wl[i]; k < i; ++k)
+                                f = std::max(f, cand[k].v);
+                        } else {
+                            for (int k = i + 1; k < wr[i]; ++k)
+                                f = std::max(f, cand[k].v);
+                        }
+                        return f;
+                    };
                     const auto deepAt = [&](int i) -> bool {
-                        double fl = 0.0, fr = 0.0;
-                        for (int k = wl[i]; k < i; ++k)
-                            fl = std::max(fl, cand[k].v);
-                        for (int k = i + 1; k < wr[i]; ++k)
-                            fr = std::max(fr, cand[k].v);
-                        const double flank = std::min(fl, fr);
+                        const double flank =
+                            std::min(flankSide(i, true), flankSide(i, false));
                         return flank > 0.0 && cand[i].v < 0.5 * flank;
+                    };
+                    // Certified candidates are sparse: between consecutive
+                    // ones the limit has no interior extremum or term
+                    // crossing, so it is monotone there. Edge cuts are
+                    // bisected threshold crossings of the limit function
+                    // itself — candidate positions alone cannot bracket a
+                    // narrow valley.
+                    Evaluator edgeEval(limits_, feedRate);
+                    const auto vLimAt = [&](double s) {
+                        return static_cast<double>(edgeEval.velocityLimit(
+                            static_cast<T>(s), *pathCopy));
+                    };
+                    // First s in [lo,hi] with vLim < thr (left valley
+                    // edge); if v(lo) is already below, returns ~lo —
+                    // the valley extends past the bracket.
+                    const auto leftEdge = [&](double lo, double hi,
+                                              double thr) {
+                        for (int it = 0; it < 60; ++it) {
+                            const double m = 0.5 * (lo + hi);
+                            if (vLimAt(m) < thr) hi = m; else lo = m;
+                        }
+                        return hi;
+                    };
+                    // First s ≥ lo with vLim ≥ thr (right valley edge);
+                    // if v(hi) stays below, returns hi.
+                    const auto rightEdge = [&](double lo, double hi,
+                                               double thr) {
+                        for (int it = 0; it < 60; ++it) {
+                            const double m = 0.5 * (lo + hi);
+                            if (vLimAt(m) < thr) lo = m; else hi = m;
+                        }
+                        return hi;
                     };
                     for (int i = 1; i + 1 < nC; ++i) {
                         if (!deepAt(i)) continue;
-                        // Inside a deep run: factor-of-two level set on
-                        // consecutive deep candidates.
+                        // A deep run is bracketed by cuts at the valley
+                        // EDGES — the positions where the limit crosses
+                        // back to flank level — so the whole dip lives
+                        // strictly INSIDE a slow piece. Cutting inside
+                        // the valley (at a deep candidate or at a sparse
+                        // flanking candidate) leaves κ/jounce tails inside
+                        // the neighbouring fast pieces, whose
+                        // interval-minimum bounds then collapse to the
+                        // dip speed via the authority-headroom checks.
+                        const int i0 = i;
+                        const double thrL = flankSide(i0, true);
+                        if (thrL > 0.0) {
+                            int iL = i0 - 1;
+                            while (iL > 0 && cand[iL].v < thrL) --iL;
+                            double edge =
+                                leftEdge(cand[iL].s, cand[i0].s, thrL);
+                            // Prefer the structural boundary: the nearest
+                            // segment junction at or before the bisected
+                            // crossing. The v_lim crossing saturates at
+                            // the feed cap while κ/jounce are still
+                            // large — a blend's shoulder can extend past
+                            // the crossing, so cutting there leaves the
+                            // tail inside the fast piece, whose
+                            // authority-headroom checks then collapse
+                            // its bound. At a junction κ,jounce → 0 by
+                            // construction. The search window is centred
+                            // on the crossing itself — candidate
+                            // positions sit a few nm inside the blend,
+                            // which previously excluded the junction.
+                            {
+                                const double snapW =
+                                    std::max(4.0 * dsScan, 0.5);
+                                double bestJ = -1.0;
+                                for (const auto& sg :
+                                     pathCopy->segments()) {
+                                    const double sj = static_cast<double>(
+                                        sg.cumulativeArcLength);
+                                    if (sj >= edge) break;
+                                    if (sj < edge - snapW) continue;
+                                    if (vLimAt(sj) <
+                                        thrL * (1.0 - 1e-9))
+                                        continue;
+                                    bestJ = sj;
+                                }
+                                if (bestJ >= 0.0) edge = bestJ;
+                            }
+                            cutS.push_back(edge);
+                        }
                         double level = cand[i].v;
-                        cutS.push_back(cand[i].s);
                         while (i + 1 < nC) {
                             const int j = i + 1;
                             if (!deepAt(j)) break;
                             ++i;
+                            // Inside a deep run: factor-of-two level set
+                            // on consecutive deep candidates.
                             if (cand[j].v < 0.5 * level ||
                                 cand[j].v > 2.0 * level) {
                                 level = cand[j].v;
@@ -4328,12 +4414,44 @@ public:
                                     break;
                             }
                         }
+                        const double thrR = flankSide(i, false);
+                        if (thrR > 0.0) {
+                            int iR = i + 1;
+                            while (iR + 1 < nC && cand[iR].v < thrR) ++iR;
+                            double edge =
+                                rightEdge(cand[i].s, cand[iR].s, thrR);
+                            // Same junction preference as the left edge:
+                            // nearest recovered junction at or after the
+                            // crossing, windowed around the crossing
+                            // rather than the candidate span.
+                            {
+                                const double snapW =
+                                    std::max(4.0 * dsScan, 0.5);
+                                for (const auto& sg :
+                                     pathCopy->segments()) {
+                                    const double sj = static_cast<double>(
+                                        sg.cumulativeArcLength);
+                                    if (sj <= edge) continue;
+                                    if (sj > edge + snapW) break;
+                                    if (vLimAt(sj) <
+                                        thrR * (1.0 - 1e-9))
+                                        continue;
+                                    edge = sj;
+                                    break;
+                                }
+                            }
+                            cutS.push_back(edge);
+                        }
                     }
-                    // Collapse near-coincident cuts (former <=2-sample
-                    // merge on a 1024 grid → ~0.2% of path length).
+                    // Collapse only near-coincident cuts (adjacent runs
+                    // can emit the same bracket edge). A wider merge
+                    // window would fuse a narrow valley's two edge cuts
+                    // back into one, re-creating the dip-inside-piece
+                    // collapse the bracketing exists to prevent.
                     {
                         std::vector<double> filtered;
-                        const double mergeD = 2.0 * dsScan;
+                        const double mergeD =
+                            1e-6 * std::max(1.0, Ltot);
                         for (const double s : cutS) {
                             if (filtered.empty() ||
                                 s - filtered.back() > mergeD)
