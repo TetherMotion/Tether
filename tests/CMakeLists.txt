@@ -1683,6 +1683,22 @@ target_link_libraries(tether_kinematics_optimizer_tests PRIVATE
 gtest_discover_tests(tether_kinematics_optimizer_tests
     PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120})
 
+# Compliant robot controller (IMC-LQG-DI) — closed-loop torque-mode
+# plant simulation; header-only controller, links tether_kinematics.
+tether_add_test_executable(tether_compliant_robot_tests
+    kinematics/test_compliant_robot_controller.cpp
+)
+target_include_directories(tether_compliant_robot_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(tether_compliant_robot_tests PRIVATE
+    tether_kinematics
+    GTest::gtest_main
+)
+gtest_discover_tests(tether_compliant_robot_tests
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120})
+
 # Build all configured test executables with `make tests` (or `ninja tests` / `cmake --build . --target tests`)
 get_property(TETHER_ALL_TEST_TARGETS GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS)
 add_custom_target(tests DEPENDS ${TETHER_ALL_TEST_TARGETS})
