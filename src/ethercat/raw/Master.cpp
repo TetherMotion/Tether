@@ -26,6 +26,7 @@
 #include "raw/internal.hpp"
 #include "raw/MasterTransports.hpp"
 #include "raw/CyclicDatapath.hpp"
+#include "raw/ProxyForwarder.hpp"
 #include "raw/SlaveRegistry.hpp"
 #include "raw/MotionLoops.hpp"
 #include "raw/WatchdogController.hpp"
@@ -186,6 +187,10 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 
     running_.store(true, std::memory_order_release);
 
+    // External-source proxy forwarding (armed via setProxyForwarding) —
+    // brings the forwarder up if the config requested it.
+    applyProxyConfig();
+
     TETHER_LOGI(TAG, "Master started");
 }
 
@@ -196,6 +201,7 @@ void Master::stop()
     stopMotionControlLoop();
     stopAsyncLoop();
     stopCyclicLoop();
+    stopProxyForwarder();
     if (slave_supervisor_) {
         slave_supervisor_->stop();
     }

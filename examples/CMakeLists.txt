@@ -229,6 +229,13 @@ add_tether_example(list_slaves
 add_tether_example(reset_slaves_al
     LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# --- EtherCAT proxy external-source client ---
+# Standalone client for the PDO proxy forwarder: injects proxy-band LRW
+# datagrams as raw EtherCAT frames or ETG.1000.3 UDP datagrams.  POSIX
+# sockets only — deliberately independent of the Tether libraries.
+add_tether_example(ecat_proxy_external_source
+    LIBRARIES tether_common)
+
 # --- Beckhoff digital output terminal demo ---
 # Auto-detects all EL200x terminals (EL2002/2004/2008 — x = channel count)
 # via the MultiOutputTerminal driver, brings them to OP, and steps a single

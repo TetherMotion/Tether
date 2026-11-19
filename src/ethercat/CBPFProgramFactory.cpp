@@ -122,25 +122,39 @@ constexpr uint32_t kFirstIdxOffTagged = 21;  // inline 802.1Q tag
 void emitIdxCheck(Asm& a, const CBPFSpec& spec, uint32_t off,
                   bool exclude, int l_accept, int l_reject) {
     const auto& r = *spec.first_idx_range;
+    // When a deny band is configured, every "accept" exit of the primary
+    // clause routes through l_pacc for the second band test.
+    const int l_pacc = spec.first_idx_deny ? a.label() : l_accept;
     int c;
     a.stmt(cbpf::LD | cbpf::B | cbpf::ABS, off);
     c = a.label();
     a.jump(cbpf::JMP | cbpf::JGE | cbpf::K, r.start, c,
-           exclude ? l_accept : l_reject);   // idx < lo
+           exclude ? l_pacc : l_reject);   // idx < lo
     a.mark(c);
     c = a.label();
     a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, r.end,
-           exclude ? l_accept : l_reject, c); // idx > hi
+           exclude ? l_pacc : l_reject, c); // idx > hi
     a.mark(c);
     if (r.hole) {
         // In-range but hole → the out-of-range verdict (0xFE stays on
         // the async socket under the socket-pair demux).
         c = a.label();
         a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, *r.hole,
-               exclude ? l_accept : l_reject, c);
+               exclude ? l_pacc : l_reject, c);
         a.mark(c);
     }
-    a.ja(exclude ? l_reject : l_accept);
+    if (!spec.first_idx_deny) {
+        a.ja(exclude ? l_reject : l_accept);
+        return;
+    }
+    a.ja(exclude ? l_reject : l_pacc);
+    // Deny band: A still holds the idx — idx∈deny → reject after all.
+    a.mark(l_pacc);
+    const auto& d = *spec.first_idx_deny;
+    c = a.label();
+    a.jump(cbpf::JMP | cbpf::JGE | cbpf::K, d.start, c, l_accept);
+    a.mark(c);
+    a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, d.end, l_accept, l_reject);
 }
 
 void emitUdpCheck(Asm& a, uint32_t base, uint32_t port,

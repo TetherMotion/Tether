@@ -107,6 +107,7 @@ namespace Raw {
 class IMotionControlLoop;
 class CyclicDatapath;
 class SlaveRegistry;
+class ProxyForwarder;
 
 class Master;
 
@@ -247,6 +248,68 @@ public:
      * @param fd File descriptor of the socket carrying EtherCAT frames.
      */
     void setWireFd(int fd) { config_.wire_fd = fd; }
+
+    // ---- External-source PDO forwarding (EtherCAT proxy) -------------------
+
+    using ProxyForwardConfig = ::EtherCAT::ProxyForwardConfig;
+    using ProxyForwardStats  = ::EtherCAT::ProxyForwardStats;
+
+    /**
+     * @brief Configure the external-source PDO forwarding path at runtime.
+     *
+     * When enabled, the datagram-index band
+     * `[idx_base, idx_base+idx_count-1]` is reserved for a foreign EtherCAT
+     * master reachable over `ifname`: packet sockets on the proxy
+     * interface and the bus interface forward in-band PDO frames in both
+     * directions, EtherCAT frames outside the band are ignored and
+     * reported as errors, and the master's own index allocator plus the
+     * wire-socket BPF stay disjoint from the band.  An optional
+     * `ProxyPdoFilter` on the config further whitelists which logical
+     * addresses the injected datagrams may read/write and which values
+     * writes may carry — unset, only the PDO-command/index checks apply.
+     *
+     * Safe to call while running — the forwarder (re)starts and the wire
+     * socket's BPF is rewritten in place.  Disabled (the default) nothing
+     * changes: no sockets, no thread, identical frame handling.
+     *
+     * Requires a direct-EtherCAT AF_PACKET wire (not the UDP-encapsulated
+     * or stub-interface paths).  The band must lie entirely below the
+     * cyclic fastpath band (0x9C) and leave async indexes for the master.
+     *
+     * @param cfg Proxy configuration; cfg.enabled=false disables.
+     * @return true when the configuration was accepted.
+     */
+    bool setProxyForwarding(const ProxyForwardConfig& cfg);
+    /**Disable the proxy path (equivalent to setProxyForwarding({})). */
+    void clearProxyForwarding() { setProxyForwarding(ProxyForwardConfig{}); }
+    /**True while a forwarder is actively pumping frames. */
+    bool isProxyForwardingEnabled() const;
+    /**The configured (requested) proxy settings — enabled may be true
+     * even when the forwarder failed to start; check
+     * isProxyForwardingEnabled() for the live state. */
+    ProxyForwardConfig proxyForwardingConfig() const {
+        std::lock_guard<std::mutex> lk(proxy_mtx_);
+        return config_.proxy;
+    }
+    /**Forwarder counters — all zero while disabled/not running. */
+    ProxyForwardStats proxyForwardingStats() const;
+
+    /**
+     * @brief Generate the proxy access whitelist from the configured PDO
+     *        map — one window per PDO region of every slave covered by
+     *        the default and group LogicalAddressManagers.
+     *
+     * Called automatically at forwarder start when
+     * ProxyForwardConfig::filter is unset; exposed so applications can
+     * inspect the generated windows, amend them (extra rules, value
+     * constraints), and hand the result back via `cfg.filter`.
+     *
+     * The result snapshots the map at call time — slaves (re)configured
+     * afterwards require a proxy re-enable to regenerate.
+     *
+     * @param sel Which PDOs to include — empty selection covers all.
+     */
+    ProxyPdoFilter buildProxyPdoFilter(const ProxyPdoSelection& sel = {});
 
     /** Set a callback invoked when the master attempts the mailbox fallback for a slave.
      *  @param cb Called with the slave address whose mailbox fell back to defaults. */
@@ -1581,6 +1644,22 @@ private:
     // src/ethercat/raw/CyclicDatapath.hpp.  Master keeps forwarders so the
     // public/test surface is unchanged.
     std::unique_ptr<CyclicDatapath> datapath_;
+
+    // ---- External-source PDO forwarding (EtherCAT proxy) ----
+    // See Master_proxy.cpp.  proxy_mtx_ serialises enable/disable races
+    // with start()/stop(); proxy_idx_band_ feeds allocIdx() — packed
+    // (hi<<8)|lo with kProxyBandEmpty (lo > hi) disabling the check.
+    static constexpr uint16_t kProxyBandEmpty = 0x00FF;
+    mutable std::mutex proxy_mtx_;
+    std::unique_ptr<ProxyForwarder> proxy_forwarder_;
+    std::atomic<uint16_t> proxy_idx_band_{kProxyBandEmpty};
+    void applyProxyConfigLocked();   // requires proxy_mtx_
+    void applyProxyConfig();         // locks, then applies
+    void stopProxyForwarder();       // locks, stops, clears the band
+    /**Rewrite the wire socket's BPF — `active` = forwarder actually
+     * running, so a failed start restores the no-proxy program. */
+    void attachProxyWireFilter(bool active);
+    int  proxyWireFd() const;        // config_.wire_fd or native handle
 
     std::unique_ptr<CyclicExecutive> cyclic_loop_;
     /**Async send-on-change loop — mutually exclusive with cyclic_loop_. */

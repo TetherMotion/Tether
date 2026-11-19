@@ -15,6 +15,7 @@
 #include "tether/ethercat/DebugFlags.hpp"
 #include "raw/internal.hpp"
 #include "raw/PacketDebugger.hpp"
+#include "raw/WireBpfSpec.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
 
@@ -632,25 +633,24 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
         // async = encap ∧ its complement.  Without this the mirror
         // attach would strip the VID filter (accepting all traffic) and
         // tagged cyclic frames would double-deliver via the router.
+        // A configured proxy band forces the composed path too — the
+        // built-in mirror has no deny clause for the extra reservation.
         const auto& we = master_.config_.wire_encap;
+        // Read the packed atomic band rather than config_.proxy — the
+        // config struct can be mutated concurrently by
+        // setProxyForwarding().
+        const uint16_t pband = master_.proxy_idx_band_.load(
+            std::memory_order_acquire);
         std::vector<CBPFInsn> accept_prog, async_prog;
-        if (we.tagged()) {
-            CBPFSpec spec;
-            spec.untagged_ethercat = false;
-            spec.tagged_ethercat   = true;
-            spec.vlan_delivery     = we.delivery_hint;
-            if (!we.rx_vlan_any) {
-                // A range clause only when a VID set was configured —
-                // rx_any must accept every TCI like the main filter.
-                spec.vlan_range = CBPFVlanRange{
-                    we.rx_vlan_lo,
-                    we.rx_vlan_hi ? we.rx_vlan_hi : we.rx_vlan_lo};
-            }
-            spec.first_idx_range = CBPFIdxRange{
-                kFastSlotBaseIdx, kFastSlotEndIdx,
-                kFastSlotReservedIdx};   // 0xFE stays async
+        if (we.tagged() || pband != Master::kProxyBandEmpty) {
+            CBPFSpec spec = wireEncapBpfSpec(we);
+            spec.first_idx_range = fastPathIdxRange();   // 0xFE stays async
             accept_prog = CBPFProgramFactory::build(spec);
             spec.first_idx_exclude = true;
+            if (pband != Master::kProxyBandEmpty)
+                spec.first_idx_deny = CBPFIdxRange{
+                    static_cast<uint8_t>(pband & 0xFF),
+                    static_cast<uint8_t>(pband >> 8)};
             async_prog = CBPFProgramFactory::build(spec);
         }
 
@@ -667,6 +667,10 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
                                                 : async_prog.data();
         cc.async_prog_len  = async_prog.size();
         channel_ = createCyclicChannel(cc);
+        // The mirror attach inside createCyclicChannel() runs whenever
+        // async_fd >= 0 — mark it so the proxy path composes its band
+        // deny on top rather than replacing the exclusion outright.
+        async_mirror_expected_ = true;
         if (!channel_) {
             TETHER_LOGW(TAG, "cyclic channel unavailable — using software "
                              "deposit path (no ring/BPF acceleration)");

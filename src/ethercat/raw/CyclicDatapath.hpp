@@ -226,6 +226,17 @@ public:
      * nullptr → software deposit path (unchanged behaviour).
      */
     std::unique_ptr<ICyclicChannel> channel_;
+
+    /**
+     * True once the async wire socket carries the fastpath-exclusion
+     * mirror filter — set by setup() when createCyclicChannel() attaches
+     * it.  The proxy path composes its band-deny clause on top of it
+     * (the kernel never auto-detaches, so it stays set across teardown()).
+     */
+    bool asyncMirrorExpected() const {
+        return async_mirror_expected_.load(std::memory_order_acquire);
+    }
+    std::atomic<bool> async_mirror_expected_{false};
     ProcessImage image_;
     ImageMode active_image_mode_ = ImageMode::Buffered;
 

@@ -188,6 +188,18 @@ struct CBPFSpec {
     bool first_idx_exclude = false;
 
     /**
+     * @brief Optional idx band that is ALWAYS rejected, applied on top of
+     *        the first_idx_range verdict.
+     *
+     * Carves an extra reservation out of the accept set without changing
+     * the primary clause — e.g. the async wire socket accepts
+     * `encap ∧ idx∉fastpath ∧ idx∉proxy-band` when a runtime proxy band
+     * is configured, while the fastpath exclusion itself stays untouched.
+     * Ignored when first_idx_range is unset.
+     */
+    std::optional<CBPFIdxRange> first_idx_deny;
+
+    /**
      * @brief Detected tag-delivery mode for the socket this program will
      *        be attached to (see probeVlanTagDelivery()).
      *

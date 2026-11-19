@@ -158,3 +158,101 @@ first datagram's `idx` byte to split cyclic from asynchronous traffic.
 traffic meant for me" ingress filter; the two can be composed (a socket
 may only carry one filter — combine policies in a single program rather
 than stacking).
+
+## Proxy forwarding band (external PDO source)
+
+When `Master::setProxyForwarding()` is enabled, a contiguous datagram-idx
+band below `0x9C` is reserved for a foreign EtherCAT master reachable
+over a second NIC. Three composed programs implement the contract:
+
+- **Bus socket** (bound to the EtherCAT interface): `encap ∧ idx∈band` —
+  only slave responses to injected PDO datagrams reach the forwarder.
+- **Proxy forward socket** (bound to the proxy interface):
+  `untagged+tagged ECAT ∧ idx∈band` — candidate frames for injection.
+- **Proxy monitor socket** (bound to the proxy interface):
+  `untagged+tagged ECAT ∧ idx∉band` — out-of-band EtherCAT frames are
+  ignored, counted (`ProxyForwardStats::out_of_band`) and logged.
+
+The async wire socket additionally gains a deny clause
+(`CBPFSpec::first_idx_deny`) so band frames can never reach the master's
+parser — with the cyclic mirror up the composed program is
+`encap ∧ idx∉fastpath ∧ idx∉band`, otherwise `encap ∧ idx∉band`.
+
+BPF only keys on the FIRST index; before injection the forwarder walks
+the whole datagram chain (`ProxyForwarder::frameIsInBandPdo`) requiring
+every datagram to be a logical command (LRD/LWR/LRW — the PDO commands)
+carrying an in-band index, so an external source cannot inject
+register/mailbox traffic or collide with master's own index space.
+`PACKET_IGNORE_OUTGOING` on all three sockets prevents forward loops.
+
+A second, optional userspace layer (`ProxyPdoFilter`) whitelists WHAT
+the datagrams may touch inside their logical address space — classic
+BPF cannot express it:
+
+- `ProxyPdoAccessRule` grants read and/or write over a logical-address
+  window; every byte of every datagram's span must be covered (LRD →
+  read, LWR → write, LRW → both, grants union across rules).
+- `ProxyPdoValueRule` constrains write payloads per cell:
+  `(value & mask) == expected` on a 1..8-byte little-endian field;
+  multiple rules on the same cell are OR'd (enumerated whitelist),
+  different cells AND.  A datagram covering only part of a constrained
+  cell is rejected — a fragment cannot prove the value.
+
+When `ProxyForwardConfig::filter` is unset the whitelist is
+**auto-generated from the PDO map** at forwarder start
+(`Master::buildProxyPdoFilter`): one window per mapped PDO region —
+per-PDO granularity for multi-PDO slaves, aggregate Rx/Tx windows for
+single-PDO slaves.  `ProxyForwardConfig::pdo_selection` restricts the
+set (`slaves`, `pdo_indexes`, `include_outputs`/`include_inputs`) and
+`bidirectional` selects the capability model — every window rw (the
+default; needed for LRW datagrams spanning input+output regions) or
+direction-split (outputs write-only, inputs read-only).  An empty PDO
+map generates zero windows → deny-all until the map exists.  Setting
+`filter` explicitly bypasses generation entirely.  Rejected frames
+bump `ProxyForwardStats::filtered`.
+
+### UDP-encapsulated input (ETG.1000.3)
+
+`ProxyForwardConfig::udp_input_port` (default 0 = off) opens an
+additional UDP listener bound to the proxy interface.  A UDP datagram
+whose payload is a bare EtherCAT frame — `[EtherCAT frame header]
+[datagrams]`, no Ethernet header — is decapsulated, wrapped in a
+synthesised Ethernet header (broadcast dst, bus-interface src MAC, plus
+an 802.1Q tag carrying `tx_vlan` when the wire is VLAN-encapsulated),
+and run through the same index-band + PDO + ACL validation as raw
+proxy-interface frames.  Slave responses are re-encapsulated and
+`sendto()`'d back to the last-seen UDP peer — a single UDP source at a
+time is supported.  This path is independent of the master's wire
+encapsulation mode: it only changes how the *external source* reaches
+the forwarder.
+
+### Lab setup without EtherCAT hardware (veth pairs)
+
+Two veth pairs emulate the two links; the "slave" end can be any EtherCAT
+echo responder (see `tests/ethercat/test_proxy_integration.cpp` for a
+complete runnable setup):
+
+```sh
+# Pair A stands in for the bus, pair B links Tether to the client.
+ip link add pxe0 type veth peer name pxe1      # bus:   Tether <-> slaves
+ip link add pxp0 type veth peer name pxp1      # proxy: Tether <-> client
+ip link set pxe0 up; ip link set pxe1 up
+ip link set pxp0 up; ip link set pxp1 up
+# Only needed for the UDP input path:
+ip addr add 10.99.0.1/24 dev pxp0
+ip addr add 10.99.0.2/24 dev pxp1
+
+# Tether: cfg.iface = "pxe0", proxy.ifname = "pxp0".
+# Client: raw  → ./ecat_proxy_external_source pxp1
+#         udp  → ./ecat_proxy_external_source pxp1 --udp 10.99.0.1
+
+# Cleanup (deleting one end drops the pair):
+ip link del pxe0; ip link del pxp0
+```
+
+`examples/ecat_proxy_external_source.cpp` is a standalone client
+(POSIX sockets only) that injects a proxy-band LRW datagram and prints
+the echoed response — usable as raw EtherCAT frames on the proxy
+interface or as ETG.1000.3 UDP datagrams via `--udp`.  The
+`ProxyIntegration` gtest suite exercises the same topology end-to-end
+and skips cleanly without CAP_NET_ADMIN/CAP_NET_RAW.

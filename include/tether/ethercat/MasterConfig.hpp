@@ -19,6 +19,7 @@
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
+#include "tether/ethercat/ProxyForwardConfig.hpp"
 #include "tether/ethercat/Types.hpp"
 
 namespace EtherCAT {
@@ -62,6 +63,15 @@ struct MasterConfig {
      * iface_.native_handle (direct EtherCAT path).
      */
     int wire_fd = -1;
+
+    /**
+     * External-source PDO forwarding ("EtherCAT proxy") — disabled by
+     * default.  Set via Master::setProxyForwarding(); when enabled the
+     * named interface carries foreign-master PDO frames whose datagram
+     * indexes lie inside the configured band to/from the bus.  Read by
+     * Master::start()/stop() and CyclicDatapath::setup().
+     */
+    ProxyForwardConfig proxy;
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     /**

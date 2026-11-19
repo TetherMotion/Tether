@@ -1399,6 +1399,8 @@ tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_cyclic_executive.cpp
     ethercat/test_async_loop.cpp
     ethercat/test_cbpf_program_factory.cpp
+    ethercat/test_proxy_forwarder.cpp
+    ethercat/test_proxy_integration.cpp
     ethercat/test_vlan_probe.cpp
 )
 

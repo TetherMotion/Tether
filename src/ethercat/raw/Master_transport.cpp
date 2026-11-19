@@ -183,9 +183,18 @@ uint8_t Master::allocIdx()
     // Skip the entire cyclic band — the 100-index reservation at
     // 0x9C..0xFF (rotating pool + PDO-slice slots + 0xFE fire-and-forget
     // + 0xFF DC timepoint).  Async traffic keeps 0x00..0x9B.
+    //
+    // When the proxy-forwarding band is armed (setProxyForwarding), its
+    // indexes are reserved for foreign-master traffic and skipped too —
+    // the band packs (hi<<8)|lo; kProxyBandEmpty has lo>hi so the check
+    // never fires while disabled.  Validation guarantees the band leaves
+    // at least one async index, so the loop always terminates.
+    const uint16_t band = proxy_idx_band_.load(std::memory_order_relaxed);
+    const uint8_t lo = static_cast<uint8_t>(band & 0xFF);
+    const uint8_t hi = static_cast<uint8_t>(band >> 8);
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
-    while (idx >= kFastSlotBaseIdx);
+    while (idx >= kFastSlotBaseIdx || (idx >= lo && idx <= hi));
     return idx;
 }
 
