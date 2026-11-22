@@ -48,6 +48,43 @@ struct ChainLink {
     JointType type{JointType::kRevolute};
 };
 
+/**
+ * @brief Nullspace objective for redundant chains (dof > task
+ * dimension): resolves the extra degrees of freedom by secondary
+ * criteria instead of minimum-norm random walk. Three independent
+ * terms, summed into one joint-space pull and projected through
+ * N = I − J⁺J so the task solution is never perturbed:
+ *
+ * - `posture`: pull toward a fixed reference configuration. Right
+ *   for anchored cyclic tasks where the redundancy should hold a
+ *   designed branch (e.g. the Franka "elbow plane on the work
+ *   direction" ready pose). Wrong for roaming tasks — it fights the
+ *   natural branch adaptation.
+ * - `lo`/`hi` + `limitGain`: joint-limit handling. Pull toward
+ *   range midpoints weighted (1+4c²) by normalized offset c —
+ *   gentle mid-centering (maximum freedom margin) that stiffens
+ *   ×5 into a repulsion near the bounds. Direction-free, so it is
+ *   the safe default for tasks whose pose roams.
+ * - `shoulder`/`elbow`/`wrist` + `elbowDir` + `swivelGain`:
+ *   swivel-angle regulation for 7-DOF arms — pulls the elbow's
+ *   offset direction about the shoulder→wrist axis toward
+ *   `elbowDir` (world). This is the geometric form of "elbow
+ *   plane toward the task": e.g. `elbowDir=-z` keeps the elbow
+ *   hanging below the shoulder–wrist line (plane contains the
+ *   reach direction for wall work), `+z` arches it up for
+ *   downward probing. Indices are jointTransform() link indices
+ *   (FR3: 2,3,5). All three >= 0 enables.
+ */
+struct NullspaceRef {
+    Eigen::VectorXd posture;      ///< fixed ref (empty = off)
+    double postureGain = 0.0;
+    Eigen::VectorXd lo, hi;       ///< joint ranges (empty = off)
+    double limitGain = 0.0;
+    int shoulder = -1, elbow = -1, wrist = -1;
+    Eigen::Vector3d elbowDir{0.0, 0.0, -1.0};
+    double swivelGain = 0.0;
+};
+
 /// Dynamic-size serial chain. All angles in radians, lengths in meters.
 class SerialChain {
 public:
@@ -187,43 +224,33 @@ public:
     }
 
     /// Resolved-rate IK: q̇ = J⁺_λ ẋ (world-frame twist [v; ω]).
-    /// `posture`+`postureGain` add a nullspace pull
-    /// `postureGain·N·(pref−q)` (units 1/s × rad → rad/s) so redundant
-    /// chains hold a high-manipulability branch at velocity level too
-    /// instead of random-walking with the minimum-norm solution. Joint
-    /// differences are wrapped to (−π,π] so the pull never kicks a 2π
-    /// step on revolute axes near the wrap.
-    Eigen::VectorXd resolvedRate(const double* q,
-                                 const Eigen::Matrix<double, 6, 1>& xdot,
-                                 double lambda = 1e-3,
-                                 const Eigen::VectorXd& posture =
-                                     Eigen::VectorXd(),
-                                 double postureGain = 0.5) const {
+    /// `ns` adds the NullspaceRef pull projected through
+    /// N = I − J⁺J (units 1/s × rad → rad/s) so redundant chains
+    /// hold their objective at velocity level too instead of
+    /// random-walking with the minimum-norm solution.
+    Eigen::VectorXd resolvedRate(
+        const double* q, const Eigen::Matrix<double, 6, 1>& xdot,
+        double lambda = 1e-3,
+        const NullspaceRef& ns = NullspaceRef()) const {
         const Eigen::Matrix<double, 6, Eigen::Dynamic> J = jacobian(q);
         const Eigen::MatrixXd Jpinv = dampedPinv(J, lambda);
         Eigen::VectorXd qdot = Jpinv * xdot;
         const size_t n = dof();
-        if (postureGain > 0.0 && posture.size() == (Eigen::Index)n) {
-            Eigen::VectorXd dp = posture;
-            for (size_t i = 0; i < n; ++i) {
-                dp[i] -= q[i];
-                if (m_links[i].type == JointType::kRevolute)
-                    dp[i] = std::remainder(dp[i], 2.0 * M_PI);
-            }
+        const Eigen::VectorXd dp = nullspacePull(q, ns);
+        if (dp.norm() > 0.0) {
             const Eigen::MatrixXd N =
                 Eigen::MatrixXd::Identity(n, n) -
                 dampedPinv(J, kNullDamp) * J;
-            qdot += postureGain * N * dp;
+            qdot += N * dp;
         }
         return qdot;
     }
-    Eigen::VectorXd resolvedRate(const Eigen::VectorXd& q,
-                                 const Eigen::Matrix<double, 6, 1>& xdot,
-                                 double lambda = 1e-3,
-                                 const Eigen::VectorXd& posture =
-                                     Eigen::VectorXd(),
-                                 double postureGain = 0.5) const {
-        return resolvedRate(q.data(), xdot, lambda, posture, postureGain);
+    Eigen::VectorXd resolvedRate(
+        const Eigen::VectorXd& q,
+        const Eigen::Matrix<double, 6, 1>& xdot,
+        double lambda = 1e-3,
+        const NullspaceRef& ns = NullspaceRef()) const {
+        return resolvedRate(q.data(), xdot, lambda, ns);
     }
 
     struct IKOptions {
@@ -232,6 +259,13 @@ public:
         double tolOri{1e-7};    ///< orientation residual [rad]
         double lambda{1e-4};    ///< Levenberg damping
         double maxStep{0.5};    ///< per-joint step clamp [rad|m]
+        /// Convergence also waits for the NullspaceRef pull to settle
+        /// (|N·dp|∞ < 1e-3): right for one-shot solves where the
+        /// redundant DOF should be resolved now. Per-cycle replanners
+        /// should pass false — the pull then acts as a bounded nudge
+        /// per call and the DOF relaxes toward the objective over
+        /// many cycles without disturbing the task.
+        bool nsSettle{true};
     };
 
     /**
@@ -241,13 +275,12 @@ public:
      * (angle-axis of R_curᵀ·R_tgt mapped through R_cur). Warm-start via
      * q (in/out); returns residual norm and success flag.
      *
-     * `posture` (optional) resolves the redundant DOF of chains with
-     * dof>6: a nullspace pull `postureGain·N·(pref−q)` is added to the
-     * DLS step each iteration — same scheme as positionIK. Without it
-     * the extra DOF random-walks with the minimum-norm steps and the
-     * arm can drift into a folded/elbow-in branch (low manipulability,
-     * branch-jump transients). Pass a high-manipulability reference
-     * (e.g. the elbow-out ready pose) to pin the swivel.
+     * `ns` (optional) resolves the redundant DOF of chains with
+     * dof>6: the NullspaceRef pull projected through N = I − J⁺J is
+     * added to the DLS step each iteration. Without it the extra DOF
+     * random-walks with the minimum-norm steps and the arm can drift
+     * into a folded/elbow-in branch (low manipulability, branch-jump
+     * transients).
      */
     bool poseIK(const Eigen::Isometry3d& target, Eigen::VectorXd& q,
                 double* residual = nullptr) const {
@@ -255,12 +288,8 @@ public:
     }
     bool poseIK(const Eigen::Isometry3d& target, Eigen::VectorXd& q,
                 const IKOptions& opt, double* residual = nullptr,
-                const Eigen::VectorXd& posture = Eigen::VectorXd(),
-                double postureGain = 0.2) const {
+                const NullspaceRef& ns = NullspaceRef()) const {
         const size_t n = dof();
-        Eigen::VectorXd pref =
-            posture.size() == (Eigen::Index)n ? posture
-                                              : Eigen::VectorXd();
         for (int it = 0; it < opt.maxIter; ++it) {
             const Eigen::Isometry3d cur = forwardKinematics(q);
             Eigen::Matrix<double, 6, 1> e;
@@ -269,29 +298,76 @@ public:
                                        target.rotation());
             e.tail<3>() = cur.rotation() * (aa.axis() * aa.angle());
             const double rn = e.norm();
-            if (e.head<3>().norm() < opt.tolPos &&
-                e.tail<3>().norm() < opt.tolOri) {
-                if (residual) *residual = rn;
-                return true;
-            }
             const Eigen::MatrixXd J = jacobian(q);
             const Eigen::MatrixXd Jpinv = dampedPinv(J, opt.lambda);
             Eigen::VectorXd dq = Jpinv * e;
-            if (pref.size()) {
-                Eigen::VectorXd dp = pref - q;
-                for (Eigen::Index i = 0; i < dp.size(); ++i)
-                    if (m_links[i].type == JointType::kRevolute)
-                        dp[i] = std::remainder(dp[i], 2.0 * M_PI);
+            Eigen::VectorXd dns = Eigen::VectorXd::Zero(n);
+            const Eigen::VectorXd dp = nullspacePull(q.data(), ns);
+            if (dp.norm() > 0.0) {
                 const Eigen::MatrixXd N =
                     Eigen::MatrixXd::Identity(n, n) -
                     dampedPinv(J, kNullDamp) * J;
-                dq += postureGain * N * dp;
+                dns = N * dp;
+                // The pull shares the maxStep budget with the
+                // Cartesian correction; cap it so a large pull
+                // (unreachable swivel direction, ×5 limit repulsion)
+                // can't starve convergence.
+                const double nsStep = dns.cwiseAbs().maxCoeff();
+                if (nsStep > 0.5 * opt.maxStep)
+                    dns *= 0.5 * opt.maxStep / nsStep;
             }
+            // Convergence needs the task AND (with nsSettle) a settled
+            // pull: exiting as soon as e < tol would strand a one-shot
+            // secondary objective wherever the first few steps left
+            // it. A pull at its optimum — or balanced against a joint
+            // limit — decays below this threshold; an unreachable one
+            // never does and falls through to the DLS polish below.
+            if (e.head<3>().norm() < opt.tolPos &&
+                e.tail<3>().norm() < opt.tolOri &&
+                (!opt.nsSettle ||
+                 dns.cwiseAbs().maxCoeff() < 1e-3)) {
+                if (residual) *residual = rn;
+                return true;
+            }
+            dq += dns;
             const double step = dq.cwiseAbs().maxCoeff();
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
             for (Eigen::Index i = 0; i < q.size(); ++i)
-                q[i] = std::remainder(q[i], 2.0 * M_PI);
+                if (m_links[i].type == JointType::kRevolute)
+                    q[i] = std::remainder(q[i], 2.0 * M_PI);
+        }
+        if (residual)
+            *residual = (forwardKinematics(q).translation() -
+                         target.translation())
+                            .norm();
+        // Polish: an undecayed pull (unreachable swivel direction or
+        // limit-vs-objective equilibrium) injects ~(dq_ns)²/radius of
+        // task-space error per step and blocks the strict tolerance
+        // above. Finish with pure DLS — it removes the residual
+        // without undoing the nullspace offset the pull achieved.
+        const bool pulled = ns.postureGain != 0.0 ||
+                            ns.limitGain != 0.0 || ns.swivelGain != 0.0;
+        for (int it = 0; pulled && it < 40; ++it) {
+            const Eigen::Isometry3d cur = forwardKinematics(q);
+            Eigen::Matrix<double, 6, 1> e;
+            e.head<3>() = target.translation() - cur.translation();
+            const Eigen::AngleAxisd aa(cur.rotation().transpose() *
+                                       target.rotation());
+            e.tail<3>() = cur.rotation() * (aa.axis() * aa.angle());
+            if (e.head<3>().norm() < opt.tolPos &&
+                e.tail<3>().norm() < opt.tolOri) {
+                if (residual) *residual = e.norm();
+                return true;
+            }
+            const Eigen::MatrixXd J = jacobian(q);
+            Eigen::VectorXd dq = dampedPinv(J, opt.lambda) * e;
+            const double step = dq.cwiseAbs().maxCoeff();
+            if (step > opt.maxStep) dq *= opt.maxStep / step;
+            q += dq;
+            for (Eigen::Index i = 0; i < q.size(); ++i)
+                if (m_links[i].type == JointType::kRevolute)
+                    q[i] = std::remainder(q[i], 2.0 * M_PI);
         }
         if (residual)
             *residual = (forwardKinematics(q).translation() -
@@ -304,24 +380,23 @@ public:
      * @brief Position-only IK (3-DOF task on an N-DOF chain).
      *
      * DLS on the translational rows of the analytic Jacobian plus a
-     * nullspace posture pull toward `posture` (empty = mid-range of the
-     * supplied `center`, or zeros). The nullspace term both regularizes
+     * nullspace pull (NullspaceRef `ns`; a zero joint vector is used
+     * when it carries no posture). The nullspace term both regularizes
      * redundant chains and resolves the extra DOF deterministically.
      * Warm-start via q (in/out).
      */
     bool positionIK(const Eigen::Vector3d& target, Eigen::VectorXd& q,
                     const IKOptions& opt, double* residual = nullptr,
-                    const Eigen::VectorXd& posture = Eigen::VectorXd(),
-                    double postureGain = 0.2) const {
+                    const NullspaceRef& ns = NullspaceRef()) const {
         const size_t n = dof();
-        Eigen::VectorXd pref =
-            posture.size() == (Eigen::Index)n ? posture
-                                              : Eigen::VectorXd::Zero(n);
+        const bool nsActive =
+            ns.posture.size() == (Eigen::Index)n ||
+            ns.limitGain != 0.0 || ns.swivelGain != 0.0;
         for (int it = 0; it < opt.maxIter; ++it) {
             const Eigen::Isometry3d cur = forwardKinematics(q);
             const Eigen::Vector3d e =
                 target - cur.translation();
-            if (e.norm() < opt.tolPos) {
+            if (!nsActive && e.norm() < opt.tolPos) {
                 if (residual) *residual = e.norm();
                 return true;
             }
@@ -348,12 +423,37 @@ public:
                 Jp.transpose() *
                     JJtN.ldlt().solve(Eigen::Matrix3d::Identity()) *
                     Jp;
-            Eigen::VectorXd dp = pref - q;
-            for (Eigen::Index i = 0; i < dp.size(); ++i)
-                if (m_links[i].type == JointType::kRevolute)
-                    dp[i] = std::remainder(dp[i], 2.0 * M_PI);
-            Eigen::VectorXd dq =
-                Jpinv * e + postureGain * N * dp;
+            // Nullspace pull: the NullspaceRef terms, or the historic
+            // default zero-pull regularizer when `ns` carries no
+            // posture (keeps the solve deterministic on redundant
+            // chains — the legacy default).
+            Eigen::VectorXd dq = Jpinv * e;
+            if (nsActive) {
+                NullspaceRef eff = ns;
+                if (eff.posture.size() != (Eigen::Index)n &&
+                    eff.postureGain != 0.0)
+                    eff.posture = Eigen::VectorXd::Zero(n);
+                Eigen::VectorXd dns =
+                    N * nullspacePull(q.data(), eff);
+                // Convergence needs task AND settled pull — see
+                // poseIK. The pull shares the maxStep budget with
+                // the Cartesian correction.
+                const double nsStep = dns.cwiseAbs().maxCoeff();
+                if (e.norm() < opt.tolPos &&
+                    (!opt.nsSettle || nsStep < 1e-3)) {
+                    if (residual) *residual = e.norm();
+                    return true;
+                }
+                if (nsStep > 0.5 * opt.maxStep)
+                    dns *= 0.5 * opt.maxStep / nsStep;
+                dq += dns;
+            } else {
+                Eigen::VectorXd dp = -q;
+                for (Eigen::Index i = 0; i < dp.size(); ++i)
+                    if (m_links[i].type == JointType::kRevolute)
+                        dp[i] = std::remainder(dp[i], 2.0 * M_PI);
+                dq += 0.2 * (N * dp);
+            }
             const double step = dq.cwiseAbs().maxCoeff();
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
@@ -632,6 +732,82 @@ public:
     }
 
 private:
+    /**
+     * Joint-space pull assembled from a NullspaceRef. Callers project
+     * it through N = I − J⁺J, so every term only ever moves the
+     * redundant directions. Units: joint deltas per gain (the IK
+     * applies them per step, resolvedRate per second).
+     */
+    Eigen::VectorXd nullspacePull(const double* q,
+                                  const NullspaceRef& ns) const {
+        const size_t n = dof();
+        Eigen::VectorXd dp = Eigen::VectorXd::Zero(n);
+        if (ns.postureGain != 0.0 &&
+            ns.posture.size() == (Eigen::Index)n) {
+            for (size_t i = 0; i < n; ++i) {
+                double d = ns.posture[i] - q[i];
+                if (m_links[i].type == JointType::kRevolute)
+                    d = std::remainder(d, 2.0 * M_PI);
+                dp[i] += ns.postureGain * d;
+            }
+        }
+        if (ns.limitGain != 0.0 &&
+            ns.lo.size() == (Eigen::Index)n &&
+            ns.hi.size() == (Eigen::Index)n) {
+            for (size_t i = 0; i < n; ++i) {
+                const double half = 0.5 * (ns.hi[i] - ns.lo[i]);
+                if (half < 1e-9) continue;
+                const double mid = 0.5 * (ns.hi[i] + ns.lo[i]);
+                const double c =
+                    std::clamp((q[i] - mid) / half, -1.0, 1.0);
+                // Mid-center pull ×(1+4c²): gentle centering far from
+                // the bounds, ×5 repulsion at them.
+                dp[i] += ns.limitGain * (mid - q[i]) * (1.0 + 4 * c * c);
+            }
+        }
+        if (ns.swivelGain != 0.0 && ns.shoulder >= 0 && ns.elbow >= 0 &&
+            ns.wrist >= 0 && ns.shoulder < (int)n &&
+            ns.elbow < (int)n && ns.wrist < (int)n) {
+            const Eigen::Vector3d S =
+                jointTransform(q, (size_t)ns.shoulder).translation();
+            const Eigen::Vector3d E =
+                jointTransform(q, (size_t)ns.elbow).translation();
+            const Eigen::Vector3d W =
+                jointTransform(q, (size_t)ns.wrist).translation();
+            const Eigen::Vector3d sw = W - S;
+            const double swLen = sw.norm();
+            if (swLen > 1e-6) {
+                const Eigen::Vector3d a = sw / swLen;
+                // Elbow offset off the shoulder→wrist axis, and the
+                // same-axis projection of the preferred direction.
+                const Eigen::Vector3d r = (E - S) - a * a.dot(E - S);
+                const Eigen::Vector3d rd =
+                    ns.elbowDir - a * a.dot(ns.elbowDir);
+                const double rr = r.norm(), rdr = rd.norm();
+                if (rr > 1e-4 && rdr > 1e-4) {
+                    // Swivel-angle error about the SW axis and the
+                    // orbit-tangent elbow correction (t̂·eψ·|r| — the
+                    // pull must run around the axis, not through it:
+                    // the straight-line pull projects to ~0 in the
+                    // nullspace for antipodal offsets).
+                    const Eigen::Vector3d rh = r / rr;
+                    const Eigen::Vector3d rdh = rd / rdr;
+                    const double ePsi = std::atan2(
+                        rh.cross(rdh).dot(a), rh.dot(rdh));
+                    const Eigen::Vector3d vE =
+                        ePsi * rr * a.cross(rh);
+                    // Elbow-point Jacobian; columns ≥ elbow are zeroed
+                    // because the hinge and downstream joints cannot
+                    // move their own origin.
+                    Eigen::MatrixXd Je = jacobian(q, E).topRows(3);
+                    Je.rightCols(n - (size_t)ns.elbow).setZero();
+                    dp += ns.swivelGain * (Je.transpose() * vE);
+                }
+            }
+        }
+        return dp;
+    }
+
     static double signedAngle(const Eigen::Vector3d& a,
                               const Eigen::Vector3d& b,
                               const Eigen::Vector3d& n) {

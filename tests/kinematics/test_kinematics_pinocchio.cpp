@@ -474,3 +474,168 @@ TEST_F(PandaTest, PoseIKOnSevenDof) {
     }
     EXPECT_GE(ok, 16);
 }
+
+// ---------------------------------------------------------------------------
+// NullspaceRef: the redundant-DOF objective must only move joints along
+// N = I - J⁺J (task preserved), be wrap-aware, repel at limits, and orbit
+// the elbow about the shoulder→wrist axis for the swivel term.
+// ---------------------------------------------------------------------------
+
+TEST_F(PandaTest, NullspacePullPreservesTask) {
+    // With xdot = 0, resolvedRate must return a pure nullspace
+    // velocity: the pull moves joints but J·qdot stays ~0.
+    for (int t = 0; t < 10; ++t) {
+        const Eigen::VectorXd q = randQ(7, -1.5, 1.5);
+        NullspaceRef ns;
+        ns.posture = randQ(7, -2.0, 2.0);
+        ns.postureGain = 0.8;
+        const Eigen::VectorXd qd = ex.chain.resolvedRate(
+            q, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+        const Eigen::VectorXd taskVel = ex.chain.jacobian(q) * qd;
+        EXPECT_LT(taskVel.norm(), 1e-5)
+            << "pull leaked into task space: " << taskVel.transpose();
+        EXPECT_GT(qd.norm(), 1e-4);  // pull is nonzero
+    }
+}
+
+TEST_F(PandaTest, NullspacePosturePullIsWrapAware) {
+    // q = -3.0, pref = +3.0: naive difference is +6.0 rad; the wrapped
+    // short way is -0.283 (crossing ±π). The pull must command the
+    // small step, never a ~2π kick.
+    Eigen::VectorXd q = Eigen::VectorXd::Zero(7);
+    q[2] = -3.0;
+    NullspaceRef ns;
+    ns.posture = Eigen::VectorXd::Zero(7);
+    ns.posture[2] = 3.0;
+    ns.postureGain = 1.0;
+    const Eigen::VectorXd qd = ex.chain.resolvedRate(
+        q, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+    EXPECT_LT(qd[2], 0.0);         // short way decreases q[2]
+    EXPECT_GT(qd[2], -0.4);        // |pull| ≈ 0.283 projected, not 6.0
+}
+
+TEST_F(PandaTest, NullspaceLimitRepulsion) {
+    Eigen::VectorXd lo(7), hi(7);
+    for (int i = 0; i < 7; ++i) {
+        lo[i] = -2.0;
+        hi[i] = 2.0;
+    }
+    NullspaceRef ns;
+    ns.lo = lo;
+    ns.hi = hi;
+    ns.limitGain = 0.5;
+    // Near the upper bound the pull pushes back down; near the lower,
+    // up; at mid-range it is ~0.
+    Eigen::VectorXd q = Eigen::VectorXd::Zero(7);
+    q[4] = 1.9;
+    const Eigen::VectorXd qdHi = ex.chain.resolvedRate(
+        q, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+    EXPECT_LT(qdHi[4], 0.0);
+    q[4] = -1.9;
+    const Eigen::VectorXd qdLo = ex.chain.resolvedRate(
+        q, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+    EXPECT_GT(qdLo[4], 0.0);
+    // And the repulsion is stiffer near the bound than mid-range.
+    Eigen::VectorXd qMid = Eigen::VectorXd::Zero(7);
+    qMid[4] = 0.5;
+    const Eigen::VectorXd qdMid = ex.chain.resolvedRate(
+        qMid, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+    EXPECT_LT(std::abs(qdMid[4]), std::abs(qdHi[4]));
+}
+
+TEST_F(PandaTest, NullspaceSwivelOrbitsElbow) {
+    // Same task pose, two opposite swivel preferences → the elbow must
+    // land at different points on the swivel orbit while both solves
+    // converge to the target. elbowDir is derived from the seed's own
+    // geometry: the orbit tangent t̂ = a×r̂ is ⊥a by construction, so
+    // the preference is never projected away.
+    const Eigen::VectorXd qSeed = [] {
+        Eigen::VectorXd q(7);
+        q << 0.6, -0.7, 0.3, -1.5, -0.4, 1.8, 0.5;
+        return q;
+    }();
+    const Eigen::Vector3d S =
+        ex.chain.jointTransform(qSeed.data(), 2).translation();
+    const Eigen::Vector3d E =
+        ex.chain.jointTransform(qSeed.data(), 3).translation();
+    const Eigen::Vector3d W =
+        ex.chain.jointTransform(qSeed.data(), 5).translation();
+    const Eigen::Vector3d a = (W - S).normalized();
+    const Eigen::Vector3d r = (E - S) - a * a.dot(E - S);
+    ASSERT_GT(r.norm(), 1e-3);  // needs a real orbit radius
+    const Eigen::Vector3d tHat = a.cross(r.normalized());
+
+    const Eigen::Isometry3d target =
+        ex.chain.forwardKinematics(qSeed);
+    SerialChain::IKOptions opt;
+    opt.maxIter = 250;
+    NullspaceRef ns;
+    ns.shoulder = 2;
+    ns.elbow = 3;
+    ns.wrist = 5;
+    ns.swivelGain = 0.4;
+    const Eigen::VectorXd seed = qSeed + randQ(7, -0.15, 0.15);
+
+    Eigen::VectorXd qFwd = seed;
+    ns.elbowDir = tHat;
+    ASSERT_TRUE(ex.chain.poseIK(target, qFwd, opt, nullptr, ns));
+    Eigen::VectorXd qBwd = seed;
+    ns.elbowDir = -tHat;
+    ASSERT_TRUE(ex.chain.poseIK(target, qBwd, opt, nullptr, ns));
+    const Eigen::Vector3d eFwd =
+        ex.chain.jointTransform(qFwd.data(), 3).translation();
+    const Eigen::Vector3d eBwd =
+        ex.chain.jointTransform(qBwd.data(), 3).translation();
+    EXPECT_GT((eFwd - eBwd).norm(), 5e-3)
+        << "swivel direction had no effect on the elbow orbit";
+    // Both solutions must still be on-task.
+    EXPECT_LT((ex.chain.forwardKinematics(qFwd).translation() -
+               target.translation())
+                  .norm(),
+              1e-6);
+    EXPECT_LT((ex.chain.forwardKinematics(qBwd).translation() -
+               target.translation())
+                  .norm(),
+              1e-6);
+}
+
+TEST_F(PandaTest, NullspaceSwivelDegenerate) {
+    // shoulder == elbow collapses the offset (r = 0): the term must
+    // skip cleanly — finite output, no NaN/instability.
+    const Eigen::VectorXd q = randQ(7, -1.0, 1.0);
+    NullspaceRef ns;
+    ns.shoulder = 2;
+    ns.elbow = 2;
+    ns.wrist = 5;
+    ns.swivelGain = 1.0;
+    const Eigen::VectorXd qd = ex.chain.resolvedRate(
+        q, Eigen::Matrix<double, 6, 1>::Zero(), 1e-3, ns);
+    EXPECT_TRUE(qd.allFinite());
+    EXPECT_LE(qd.norm(), 1e-9);
+}
+
+TEST_F(PandaTest, NullspacePosturePinsIkBranch) {
+    // A posture pull must move the converged solution toward the
+    // reference on the redundant direction while staying on-task.
+    const Eigen::VectorXd qTrue = randQ(7, -0.8, 0.8);
+    const Eigen::Isometry3d target =
+        ex.chain.forwardKinematics(qTrue);
+    SerialChain::IKOptions opt;
+    opt.maxIter = 250;
+    const Eigen::VectorXd seed = qTrue + randQ(7, -0.25, 0.25);
+
+    Eigen::VectorXd qFree = seed;
+    ASSERT_TRUE(ex.chain.poseIK(target, qFree, opt));
+
+    NullspaceRef ns;
+    ns.posture = Eigen::VectorXd::Zero(7);
+    ns.postureGain = 0.4;
+    Eigen::VectorXd qPin = seed;
+    ASSERT_TRUE(ex.chain.poseIK(target, qPin, opt, nullptr, ns));
+
+    EXPECT_LT(qPin.norm(), qFree.norm());
+    EXPECT_LT((ex.chain.forwardKinematics(qPin).translation() -
+               target.translation())
+                  .norm(),
+              1e-6);
+}
