@@ -334,8 +334,7 @@ public:
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
             for (Eigen::Index i = 0; i < q.size(); ++i)
-                if (m_links[i].type == JointType::kRevolute)
-                    q[i] = std::remainder(q[i], 2.0 * M_PI);
+                q[i] = wrapJoint(i, q[i], ns);
         }
         if (residual)
             *residual = (forwardKinematics(q).translation() -
@@ -366,8 +365,7 @@ public:
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
             for (Eigen::Index i = 0; i < q.size(); ++i)
-                if (m_links[i].type == JointType::kRevolute)
-                    q[i] = std::remainder(q[i], 2.0 * M_PI);
+                q[i] = wrapJoint(i, q[i], ns);
         }
         if (residual)
             *residual = (forwardKinematics(q).translation() -
@@ -458,8 +456,7 @@ public:
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
             for (Eigen::Index i = 0; i < q.size(); ++i)
-                if (m_links[i].type == JointType::kRevolute)
-                    q[i] = std::remainder(q[i], 2.0 * M_PI);
+                q[i] = wrapJoint(i, q[i], ns);
         }
         if (residual)
             *residual = (forwardKinematics(q).translation() - target)
@@ -732,6 +729,30 @@ public:
     }
 
 private:
+    /**
+     * Wrap a revolute joint coordinate to its 2π-equivalent nearest
+     * the legal operating range: when the NullspaceRef carries joint
+     * bounds the equivalent is chosen about the range midpoint (e.g.
+     * FR3 joint6 [0.44,4.62] keeps 3.42 instead of folding to −2.86),
+     * otherwise about zero. Bounded joints must never be folded onto
+     * an equivalent angle outside their mechanical range — the
+     * controller's posture error then sees a phantom ~2π excursion.
+     */
+    double wrapJoint(Eigen::Index i, double v,
+                     const NullspaceRef& ns) const {
+        if (m_links[i].type != JointType::kRevolute) return v;
+        const Eigen::Index n = dof();
+        if (ns.lo.size() == n && ns.hi.size() == n &&
+            ns.hi[i] > ns.lo[i]) {
+            const double mid = 0.5 * (ns.lo[i] + ns.hi[i]);
+            const double w = mid + std::remainder(v - mid, 2.0 * M_PI);
+            // Ranges narrower than π can still fold out of bounds —
+            // the equivalent nearest the midpoint may lie below lo.
+            return std::clamp(w, ns.lo[i], ns.hi[i]);
+        }
+        return std::remainder(v, 2.0 * M_PI);
+    }
+
     /**
      * Joint-space pull assembled from a NullspaceRef. Callers project
      * it through N = I − J⁺J, so every term only ever moves the
