@@ -318,6 +318,19 @@ void Master::attachProxyWireFilter(bool active)
     const int fd = proxyWireFd();
     if (fd < 0) return;
 
+    /* The BPF spec is written for AF_PACKET wire sockets — the filter
+       sees the Ethernet frame at offset 0.  iface_.native_handle may
+       be any socket (e.g. UdpEthercatLink's datagram socket, which
+       carries Ethernet frames as UDP payloads): the cBPF layout does
+       not match there and the filter would drop every inbound
+       datagram, including discovery replies. */
+    sockaddr_ll sll{};
+    socklen_t sll_len = sizeof(sll);
+    if (::getsockname(fd, reinterpret_cast<sockaddr*>(&sll),
+                      &sll_len) != 0 ||
+        sll.sll_family != AF_PACKET)
+        return;
+
     const auto& p = config_.proxy;
     CBPFSpec spec = wireEncapBpfSpec(config_.wire_encap);
 

@@ -621,8 +621,13 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
         sockaddr_ll sll{};
         socklen_t sll_len = sizeof(sll);
         int ifindex = 0;
+        /* native_handle may be a non-AF_PACKET socket (e.g. the
+           UdpEthercatLink datagram socket): getsockname then returns a
+           sockaddr_in whose bytes alias sll_ifindex with garbage, and
+           the async-mirror BPF attach would drop every datagram. */
         if (::getsockname(fd, reinterpret_cast<sockaddr*>(&sll),
-                          &sll_len) == 0) {
+                          &sll_len) == 0 &&
+            sll.sll_family == AF_PACKET) {
             ifindex = sll.sll_ifindex;
         }
 
