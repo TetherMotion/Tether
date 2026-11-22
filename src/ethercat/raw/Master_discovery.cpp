@@ -73,6 +73,12 @@ bool Master::discoverSlaves()
             TETHER_LOGI(TAG, "discoverSlaves: cancelled");
             return false;
         }
+        // Throttled progress: a silent ~80 s of BRD retries is
+        // indistinguishable from a hang to anyone watching the scan.
+        if (attempt > 0 && attempt % 20 == 0) {
+            TETHER_LOGW(TAG, "discoverSlaves: BRD scan still waiting for "
+                         "a response (attempt {}/200)", attempt + 1, 200);
+        }
 
         const uint8_t idx = allocIdx();
         auto frame = buildScanFrame(src_mac_);
@@ -136,8 +142,14 @@ bool Master::discoverSlaves()
             }
             return true;
         }
+        if (attempt == 0) {
+            TETHER_LOGW(TAG, "discoverSlaves: BRD scan got no response — "
+                         "retrying (check link/iface; ~80 s budget)");
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    TETHER_LOGW(TAG, "discoverSlaves: BRD scan exhausted all retries — "
+                 "no slave answered the broadcast read");
     return false;
 }
 
@@ -152,6 +164,10 @@ uint16_t Master::discoverSlaveCount()
         if (cancel_requested_.load(std::memory_order_acquire)) {
             TETHER_LOGI(TAG, "discoverSlaveCount: cancelled");
             return 0;
+        }
+        if (attempt > 0 && attempt % 20 == 0) {
+            TETHER_LOGW(TAG, "discoverSlaveCount: BRD scan still waiting "
+                         "for a response (attempt {}/200)", attempt + 1, 200);
         }
 
         const uint8_t idx = allocIdx();
@@ -188,8 +204,14 @@ uint16_t Master::discoverSlaveCount()
             TETHER_LOGI(TAG, "discoverSlaveCount: discovered {} slave(s)", result.wkc);
             return result.wkc;
         }
+        if (attempt == 0) {
+            TETHER_LOGW(TAG, "discoverSlaveCount: BRD scan got no response — "
+                         "retrying (check link/iface; ~80 s budget)");
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    TETHER_LOGW(TAG, "discoverSlaveCount: BRD scan exhausted all retries — "
+                 "no slave answered the broadcast read");
     return 0;
 }
 

@@ -32,6 +32,7 @@
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/SlavePdoTypes.hpp"
 #include "tether/ethercat/Mailbox.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -64,11 +65,37 @@ public:
     /**
      * Open a raw AF_PACKET link on @p ifaceName (e.g. one end of a veth
      * pair) and start the master.  Requires CAP_NET_RAW.
+     *
+     * NOTE: this path sends with a hard-coded locally-administered src
+     * MAC, so replies addressed to it are dropped by a real NIC that
+     * does not own that address.  For real hardware prefer openHost(),
+     * which uses the interface's actual MAC via the host Ethernet
+     * session (same path as the Tether examples).
      */
     bool openIface(const std::string& ifaceName) {
         close();
         if (!packetLink_.open(ifaceName)) return false;
         startMaster(packetLink_.interface());
+        return true;
+    }
+
+    /**
+     * Open @p ifaceName through Tether's one-call host bring-up
+     * (EtherCAT::bringUpHost — real MAC, promiscuous + ethertype-
+     * filtered socket, kernel cBPF encapsulation filter, NIC checks,
+     * realtime poll thread), the same path the Tether host examples
+     * (list_slaves etc.) use.  Requires CAP_NET_RAW.  Use this for
+     * real NICs; openIface() is only suited to virtual links (veth)
+     * where the peer accepts any src MAC.
+     */
+    bool openHost(const std::string& ifaceName) {
+        close();
+        if (!EtherCAT::bringUpHost(hostSession_, master_, ifaceName,
+                                   EtherCAT::EncapsulationConfig{},
+                                   "fleet-master")) {
+            return false;
+        }
+        hostMode_ = true;
         return true;
     }
 
@@ -78,6 +105,10 @@ public:
         rxRunning_.store(false);
         if (rxThread_.joinable()) rxThread_.join();
         if (master_.isRunning()) master_.stop();
+        if (hostMode_) {
+            EtherCAT::shutdownHostEthernet(hostSession_);
+            hostMode_ = false;
+        }
         link_.close();
         packetLink_.close();
     }
@@ -103,7 +134,8 @@ public:
             {EtherCAT::DiscoveryOption::VendorId,
              EtherCAT::DiscoveryOption::ProductCode,
              EtherCAT::DiscoveryOption::RevisionNumber,
-             EtherCAT::DiscoveryOption::SerialNumber});
+             EtherCAT::DiscoveryOption::SerialNumber,
+             EtherCAT::DiscoveryOption::DeviceNames});
         if (found.empty()) {
             std::fprintf(stderr, "fleet-master: no slaves discovered\n");
             return -1;
@@ -263,6 +295,8 @@ private:
 
     UdpEthercatLink      link_;
     PacketEthercatLink   packetLink_;
+    EtherCAT::HostEtherNetSession hostSession_;
+    bool                 hostMode_{false};
     EtherCAT::Master     master_;
     std::atomic<bool>    rxRunning_{false};
     std::thread          rxThread_;

@@ -81,11 +81,11 @@ inline std::vector<FleetSlaveInfo> fleetInfos() {
         const char* key;      // short id suffix, e.g. "el1004.c1"
         const char* name;     // Beckhoff part name
         uint32_t    product;
-        uint8_t     di8, do8, ai, ao;
+        uint8_t     di, dout, ai, ao;   // real channel counts
     };
     static const ModuleSpec kModules[] = {
-        {"el1004", "EL1004", b::kEL1004Product, 1, 0, 0, 0},
-        {"el2004", "EL2004", b::kEL2004Product, 0, 1, 0, 0},
+        {"el1004", "EL1004", b::kEL1004Product, 4, 0, 0, 0},
+        {"el2004", "EL2004", b::kEL2004Product, 0, 4, 0, 0},
         {"el3104", "EL3104", b::kEL3104Product, 0, 0, 4, 0},
         {"el4104", "EL4104", b::kEL4104Product, 0, 0, 0, 4},
     };
@@ -112,8 +112,8 @@ inline std::vector<FleetSlaveInfo> fleetInfos() {
                              std::to_string(c) + ")";
             mi.vendorId    = b::kVendor;
             mi.productCode = m.product;
-            mi.diSize      = m.di8;
-            mi.doSize      = m.do8;
+            mi.diSize      = static_cast<uint16_t>((m.di + 7) / 8);
+            mi.doSize      = static_cast<uint16_t>((m.dout + 7) / 8);
             mi.aiSize      = static_cast<uint16_t>(m.ai * 2);
             mi.aoSize      = static_cast<uint16_t>(m.ao * 2);
             mi.txSize      = static_cast<uint16_t>(mi.diSize + mi.aiSize);
@@ -130,14 +130,18 @@ inline std::vector<FleetSlaveInfo> fleetInfos() {
 
 namespace detail {
 
-/// Beckhoff module type → PDO channel layout.  di/do are whole-byte
-/// counts inside the PDO image; ai/ao are int16 channel counts —
-/// mirrors what CiA401Slave produces for the same counts.
+/// Beckhoff module type → PDO channel layout.  di/do are real
+/// channel counts (bits pack ceil(ch/8) into the PDO image); ai/ao
+/// are int16 channel counts — mirrors what CiA401Slave produces.
 struct FleetModuleType {
     const char* name;      ///< part number, e.g. "EL1014"
     uint32_t    product;   ///< Beckhoff product code
-    uint8_t     di8, do8;  ///< digital in/out bytes
+    uint8_t     di, dout;  ///< digital in/out channels
     uint8_t     ai, ao;    ///< analog in/out channels (int16 each)
+
+    /// Digital-channel bytes inside the PDO image.
+    constexpr uint8_t diBytes()  const { return (di   + 7) / 8; }
+    constexpr uint8_t doBytes()  const { return (dout + 7) / 8; }
 };
 
 /// The module catalog shared by fleetInfosFromText and the WebUI's
@@ -145,10 +149,10 @@ struct FleetModuleType {
 inline const FleetModuleType* fleetModuleCatalog(size_t& n) {
     namespace b = ids;
     static const FleetModuleType kTypes[] = {
-        {"EL1004", b::kEL1004Product, 1, 0, 0, 0},
-        {"EL1014", b::kEL1014Product, 1, 0, 0, 0},
-        {"EL2004", b::kEL2004Product, 0, 1, 0, 0},
-        {"EL2008", b::kEL2008Product, 0, 1, 0, 0},   // 8 DO → 1 byte
+        {"EL1004", b::kEL1004Product, 4, 0, 0, 0},
+        {"EL1014", b::kEL1014Product, 4, 0, 0, 0},
+        {"EL2004", b::kEL2004Product, 0, 4, 0, 0},
+        {"EL2008", b::kEL2008Product, 0, 8, 0, 0},   // 8 DO → 1 byte
         {"EL3104", b::kEL3104Product, 0, 0, 4, 0},
         {"EL3114", b::kEL3114Product, 0, 0, 4, 0},
         {"EL4104", b::kEL4104Product, 0, 0, 0, 4},
@@ -243,8 +247,8 @@ fleetInfosFromText(const std::string& text, std::string* err = nullptr) {
                          std::to_string(coupler) + ")";
         mi.vendorId    = ids::kVendor;
         mi.productCode = t->product;
-        mi.diSize      = t->di8;
-        mi.doSize      = t->do8;
+        mi.diSize      = t->diBytes();
+        mi.doSize      = t->doBytes();
         mi.aiSize      = static_cast<uint16_t>(t->ai * 2);
         mi.aoSize      = static_cast<uint16_t>(t->ao * 2);
         mi.txSize      = static_cast<uint16_t>(mi.diSize + mi.aiSize);

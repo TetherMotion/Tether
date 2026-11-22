@@ -135,6 +135,8 @@ std::vector<DiscoveredSlave> SlaveDiscoveryManager::discoverSync(
 
     const uint16_t slave_count = master_->getDiscoveredSlaveCount();
     if (slave_count == 0) return {};
+    TETHER_LOGI(TAG, "BRD scan done: {} slave(s) — reading SII identity",
+                slave_count);
 
     // ---- 2. Determine which slave indices to read SII for ----
     std::vector<uint16_t> target_indices;
