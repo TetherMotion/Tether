@@ -167,6 +167,13 @@ public:
         return jacobian(q.data());
     }
 
+    /// Damping used for the nullspace projector N = I − J⁺J in the
+    /// posture pulls. Deliberately tiny and independent of the solver
+    /// damping: the projector is bounded (eigenvalues ∈ [0,1]) for any
+    /// λ, and a small λ keeps the pull's task-space leak ~(λ/σ)² far
+    /// below the IK tolerances (λ=1e-4 would leak ~1e-6 > tolPos).
+    static constexpr double kNullDamp = 1e-8;
+
     /// Damped least-squares right pseudoinverse of a 6×n J.
     static Eigen::MatrixXd dampedPinv(
         const Eigen::Matrix<double, 6, Eigen::Dynamic>& J,
@@ -180,15 +187,43 @@ public:
     }
 
     /// Resolved-rate IK: q̇ = J⁺_λ ẋ (world-frame twist [v; ω]).
+    /// `posture`+`postureGain` add a nullspace pull
+    /// `postureGain·N·(pref−q)` (units 1/s × rad → rad/s) so redundant
+    /// chains hold a high-manipulability branch at velocity level too
+    /// instead of random-walking with the minimum-norm solution. Joint
+    /// differences are wrapped to (−π,π] so the pull never kicks a 2π
+    /// step on revolute axes near the wrap.
     Eigen::VectorXd resolvedRate(const double* q,
                                  const Eigen::Matrix<double, 6, 1>& xdot,
-                                 double lambda = 1e-3) const {
-        return dampedPinv(jacobian(q), lambda) * xdot;
+                                 double lambda = 1e-3,
+                                 const Eigen::VectorXd& posture =
+                                     Eigen::VectorXd(),
+                                 double postureGain = 0.5) const {
+        const Eigen::Matrix<double, 6, Eigen::Dynamic> J = jacobian(q);
+        const Eigen::MatrixXd Jpinv = dampedPinv(J, lambda);
+        Eigen::VectorXd qdot = Jpinv * xdot;
+        const size_t n = dof();
+        if (postureGain > 0.0 && posture.size() == (Eigen::Index)n) {
+            Eigen::VectorXd dp = posture;
+            for (size_t i = 0; i < n; ++i) {
+                dp[i] -= q[i];
+                if (m_links[i].type == JointType::kRevolute)
+                    dp[i] = std::remainder(dp[i], 2.0 * M_PI);
+            }
+            const Eigen::MatrixXd N =
+                Eigen::MatrixXd::Identity(n, n) -
+                dampedPinv(J, kNullDamp) * J;
+            qdot += postureGain * N * dp;
+        }
+        return qdot;
     }
     Eigen::VectorXd resolvedRate(const Eigen::VectorXd& q,
                                  const Eigen::Matrix<double, 6, 1>& xdot,
-                                 double lambda = 1e-3) const {
-        return resolvedRate(q.data(), xdot, lambda);
+                                 double lambda = 1e-3,
+                                 const Eigen::VectorXd& posture =
+                                     Eigen::VectorXd(),
+                                 double postureGain = 0.5) const {
+        return resolvedRate(q.data(), xdot, lambda, posture, postureGain);
     }
 
     struct IKOptions {
@@ -205,13 +240,27 @@ public:
      * Error: position difference + world-frame rotation-vector
      * (angle-axis of R_curᵀ·R_tgt mapped through R_cur). Warm-start via
      * q (in/out); returns residual norm and success flag.
+     *
+     * `posture` (optional) resolves the redundant DOF of chains with
+     * dof>6: a nullspace pull `postureGain·N·(pref−q)` is added to the
+     * DLS step each iteration — same scheme as positionIK. Without it
+     * the extra DOF random-walks with the minimum-norm steps and the
+     * arm can drift into a folded/elbow-in branch (low manipulability,
+     * branch-jump transients). Pass a high-manipulability reference
+     * (e.g. the elbow-out ready pose) to pin the swivel.
      */
     bool poseIK(const Eigen::Isometry3d& target, Eigen::VectorXd& q,
                 double* residual = nullptr) const {
         return poseIK(target, q, IKOptions(), residual);
     }
     bool poseIK(const Eigen::Isometry3d& target, Eigen::VectorXd& q,
-                const IKOptions& opt, double* residual = nullptr) const {
+                const IKOptions& opt, double* residual = nullptr,
+                const Eigen::VectorXd& posture = Eigen::VectorXd(),
+                double postureGain = 0.2) const {
+        const size_t n = dof();
+        Eigen::VectorXd pref =
+            posture.size() == (Eigen::Index)n ? posture
+                                              : Eigen::VectorXd();
         for (int it = 0; it < opt.maxIter; ++it) {
             const Eigen::Isometry3d cur = forwardKinematics(q);
             Eigen::Matrix<double, 6, 1> e;
@@ -225,8 +274,19 @@ public:
                 if (residual) *residual = rn;
                 return true;
             }
-            Eigen::VectorXd dq =
-                dampedPinv(jacobian(q), opt.lambda) * e;
+            const Eigen::MatrixXd J = jacobian(q);
+            const Eigen::MatrixXd Jpinv = dampedPinv(J, opt.lambda);
+            Eigen::VectorXd dq = Jpinv * e;
+            if (pref.size()) {
+                Eigen::VectorXd dp = pref - q;
+                for (Eigen::Index i = 0; i < dp.size(); ++i)
+                    if (m_links[i].type == JointType::kRevolute)
+                        dp[i] = std::remainder(dp[i], 2.0 * M_PI);
+                const Eigen::MatrixXd N =
+                    Eigen::MatrixXd::Identity(n, n) -
+                    dampedPinv(J, kNullDamp) * J;
+                dq += postureGain * N * dp;
+            }
             const double step = dq.cwiseAbs().maxCoeff();
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
@@ -277,10 +337,23 @@ public:
             const Eigen::MatrixXd Jpinv =
                 Jp.transpose() * JJt.ldlt()
                                      .solve(Eigen::Matrix3d::Identity());
+            // Projector with its own tiny damping (see kNullDamp):
+            // reusing the solver pinv would leak ~(lam/σ)² of the
+            // posture pull into the task direction.
+            const Eigen::Matrix3d JJtN =
+                Jp * Jp.transpose() +
+                kNullDamp * kNullDamp * Eigen::Matrix3d::Identity();
             const Eigen::MatrixXd N =
-                Eigen::MatrixXd::Identity(n, n) - Jpinv * Jp;
+                Eigen::MatrixXd::Identity(n, n) -
+                Jp.transpose() *
+                    JJtN.ldlt().solve(Eigen::Matrix3d::Identity()) *
+                    Jp;
+            Eigen::VectorXd dp = pref - q;
+            for (Eigen::Index i = 0; i < dp.size(); ++i)
+                if (m_links[i].type == JointType::kRevolute)
+                    dp[i] = std::remainder(dp[i], 2.0 * M_PI);
             Eigen::VectorXd dq =
-                Jpinv * e + postureGain * N * (pref - q);
+                Jpinv * e + postureGain * N * dp;
             const double step = dq.cwiseAbs().maxCoeff();
             if (step > opt.maxStep) dq *= opt.maxStep / step;
             q += dq;
