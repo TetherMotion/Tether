@@ -220,3 +220,63 @@ TEST(BeckhoffFleet, DigitalAndAnalogPath) {
     EXPECT_EQ(fx.fleet.slave(el4104->chainIndex).getAnalogOutput(1),
               -320);
 }
+
+/* ---- autodiscovery helpers (tplc-ec-pump --scan / --fleet auto) ---- */
+
+TEST(FleetScan, ProductLookup) {
+    namespace d = tether::examples::detail;
+    namespace b = beckhoff_ids;
+    EXPECT_EQ(d::fleetModuleForProduct(b::kEL1014Product)->name,
+              std::string("EL1014"));
+    EXPECT_EQ(d::fleetModuleForProduct(b::kEL3104Product)->ai, 4);
+    EXPECT_EQ(d::fleetModuleForProduct(b::kEL4104Product)->ao, 4);
+    // coupler and unknown products are not modules
+    EXPECT_EQ(d::fleetModuleForProduct(b::kEK1100Product), nullptr);
+    EXPECT_EQ(d::fleetModuleForProduct(0xDEADBEEF), nullptr);
+    EXPECT_TRUE(d::fleetIsCouplerProduct(b::kEK1100Product));
+    EXPECT_FALSE(d::fleetIsCouplerProduct(b::kEL1014Product));
+}
+
+TEST(FleetScan, TextFromScanRoundTrip) {
+    namespace d = tether::examples::detail;
+    namespace b = beckhoff_ids;
+    std::vector<d::FleetScanSlave> chain = {
+        {b::kVendor, b::kEK1100Product, ""},
+        {b::kVendor, b::kEL1014Product, ""},
+        {b::kVendor, b::kEL1014Product, ""},
+        {b::kVendor, b::kEL2004Product, ""},
+        {b::kVendor, b::kEK1100Product, ""},
+        {b::kVendor, b::kEL3104Product, ""},
+    };
+    const auto r = d::fleetTextFromScan(chain);
+    EXPECT_TRUE(r.unknown.empty());
+    EXPECT_EQ(r.couplers, 2u);
+    EXPECT_EQ(r.modules, 4u);
+    EXPECT_EQ(r.text,
+              "EK1100\nEL1014\nEL1014\nEL2004\nEK1100\nEL3104\n");
+
+    // the generated text parses back to the same infos, and the
+    // canonical re-emit is identical (stable artifact)
+    std::string err;
+    const auto infos = d::fleetInfosFromText(r.text, &err);
+    ASSERT_EQ(infos.size(), 6u);
+    EXPECT_EQ(infos[2].key, "el1014.c1.2");   // repeat → occurrence key
+    EXPECT_EQ(infos[5].key, "el3104.c2");
+    EXPECT_EQ(d::fleetTextFromInfos(infos), r.text);
+}
+
+TEST(FleetScan, UnknownIdentitiesReported) {
+    namespace d = tether::examples::detail;
+    namespace b = beckhoff_ids;
+    std::vector<d::FleetScanSlave> chain = {
+        {b::kVendor, b::kEK1100Product, ""},
+        {b::kVendor, b::kEL1014Product, ""},
+        {0x00001234u, 0x00ABCDEFu, "mystery box"},
+    };
+    const auto r = d::fleetTextFromScan(chain);
+    EXPECT_EQ(r.unknown.size(), 1u);
+    EXPECT_EQ(r.unknown[0].vendor, 0x00001234u);
+    EXPECT_EQ(r.unknown[0].product, 0x00ABCDEFu);
+    // known slaves still resolve; unknown contributes no line
+    EXPECT_EQ(r.text, "EK1100\nEL1014\n");
+}

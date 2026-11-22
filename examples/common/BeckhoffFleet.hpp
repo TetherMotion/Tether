@@ -294,6 +294,89 @@ fleetInfosFromFile(const std::string& path, std::string* err = nullptr) {
     return fleetInfosFromText(ss.str(), err);
 }
 
+/* ---- bus-scan helpers -------------------------------------------------
+   Inverse of fleetInfosFromText: map discovered (vendor, product)
+   identities back onto fleet-description lines so a master can build
+   its topology from the bus itself (`tplc-ec-pump --scan` /
+   `--fleet auto`) instead of a hand-written fleet file. */
+
+/// One discovered slave's identity, reduced to what the catalog
+/// resolves. `name` is the optional SII device name (display only).
+struct FleetScanSlave {
+    uint32_t    vendor  = 0;
+    uint32_t    product = 0;
+    std::string name;
+};
+
+struct FleetScanResult {
+    std::string                 text;     ///< EK1100/ELxxxx lines
+    std::vector<FleetScanSlave> unknown;  ///< unresolved identities
+    size_t                      couplers = 0;
+    size_t                      modules  = 0;
+};
+
+/// Catalog module whose Beckhoff product code matches @p product,
+/// or nullptr (EK1100 and non-catalog parts never match).
+inline const FleetModuleType* fleetModuleForProduct(uint32_t product) {
+    size_t n = 0;
+    const FleetModuleType* t = fleetModuleCatalog(n);
+    for (size_t i = 0; i < n; ++i)
+        if (t[i].product == product) return &t[i];
+    return nullptr;
+}
+
+/// True when @p product is the EK1100 coupler identity.
+inline bool fleetIsCouplerProduct(uint32_t product) {
+    return product == beckhoff_ids::kEK1100Product;
+}
+
+/**
+ * @brief Fleet-description text for a discovered slave chain.
+ *
+ * EK1100 slaves emit `EK1100` lines (opening coupler segments);
+ * catalog modules emit their part-number line; any other identity is
+ * appended to `unknown` and contributes no line — callers must treat
+ * a non-empty `unknown` as "cannot auto-configure this bus".
+ */
+inline FleetScanResult fleetTextFromScan(
+    const std::vector<FleetScanSlave>& slaves) {
+    FleetScanResult r;
+    for (const auto& s : slaves) {
+        if (fleetIsCouplerProduct(s.product)) {
+            r.text += "EK1100\n";
+            ++r.couplers;
+            continue;
+        }
+        if (const FleetModuleType* t = fleetModuleForProduct(s.product)) {
+            r.text += t->name;
+            r.text += '\n';
+            ++r.modules;
+            continue;
+        }
+        r.unknown.push_back(s);
+    }
+    return r;
+}
+
+/**
+ * @brief Fleet-description text reconstructed from resolved
+ *        FleetSlaveInfos (post-parse canonical form — safe to write
+ *        back out as a fleet file or topology artifact).
+ */
+inline std::string fleetTextFromInfos(
+    const std::vector<FleetSlaveInfo>& infos) {
+    std::string out;
+    for (const auto& i : infos) {
+        if (i.isCoupler) {
+            out += "EK1100\n";
+            continue;
+        }
+        out += i.name.substr(0, i.name.find(" ("));
+        out += '\n';
+    }
+    return out;
+}
+
 } // namespace detail
 
 /**
