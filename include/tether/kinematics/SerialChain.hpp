@@ -26,6 +26,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
 
 #include <array>
@@ -83,6 +84,12 @@ struct NullspaceRef {
     int shoulder = -1, elbow = -1, wrist = -1;
     Eigen::Vector3d elbowDir{0.0, 0.0, -1.0};
     double swivelGain = 0.0;
+    /// Mobility ascent weight: pulls the redundant DOF up the
+    /// log det(JJᵀ) = Σ log σᵢ² gradient. The gradient is dominated
+    /// by the smallest σ, so this is a smooth σ_min maximizer —
+    /// the arm re-poses toward its high-mobility branch instead of
+    /// latching in a folded/yaw-wrapped pose at the workspace edge.
+    double mobilityGain = 0.0;
 };
 
 /// Dynamic-size serial chain. All angles in radians, lengths in meters.
@@ -253,6 +260,52 @@ public:
         return resolvedRate(q.data(), xdot, lambda, ns);
     }
 
+    /**
+     * @brief ∂/∂q of log det(JJᵀ) — the mobility ascent direction.
+     *
+     * log det(JJᵀ) = Σ log σᵢ²; differentiating gives
+     * Σ (2/σᵢ)·∂σᵢ — dominated by the smallest σ, so ascending this
+     * gradient is a smooth σ_min maximizer: it re-poses the redundant
+     * DOF toward the highest-mobility branch, which is what unwinds
+     * folded or yaw-wrapped configurations near the workspace edge.
+     * Forward differences; n extra Jacobian evaluations per call.
+     */
+    Eigen::VectorXd mobilityGradient(const double* q,
+                                     double eps = 1e-4) const {
+        const size_t n = dof();
+        const Eigen::MatrixXd J0 = jacobian(q);
+        const double ld0 =
+            std::log(std::max((J0 * J0.transpose()).determinant(),
+                              1e-30));
+        const Eigen::VectorXd q0 =
+            Eigen::Map<const Eigen::VectorXd>(q, (Eigen::Index)n);
+        Eigen::VectorXd g(n), qp = q0;
+        for (size_t j = 0; j < n; ++j) {
+            qp = q0;
+            qp[(Eigen::Index)j] += eps;
+            const Eigen::MatrixXd Jj = jacobian(qp.data());
+            g[(Eigen::Index)j] =
+                (std::log(std::max(
+                     (Jj * Jj.transpose()).determinant(), 1e-30)) -
+                 ld0) /
+                eps;
+        }
+        return g;
+    }
+
+    /**
+     * @brief Smallest singular value of jacobian(q) — the mobility
+     * metric used to gate planner output: how much task-space motion
+     * the worst direction still produces per unit joint motion.
+     * ~0 means the arm is at (or beyond) its workspace boundary.
+     */
+    double sigmaMin(const double* q) const {
+        const Eigen::MatrixXd J = jacobian(q);
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(
+            J * J.transpose());
+        return std::sqrt(std::max(es.eigenvalues()[0], 0.0));
+    }
+
     struct IKOptions {
         int maxIter{150};       ///< DLS iterations
         double tolPos{1e-8};    ///< position residual [m]
@@ -346,7 +399,9 @@ public:
         // above. Finish with pure DLS — it removes the residual
         // without undoing the nullspace offset the pull achieved.
         const bool pulled = ns.postureGain != 0.0 ||
-                            ns.limitGain != 0.0 || ns.swivelGain != 0.0;
+                            ns.limitGain != 0.0 ||
+                            ns.swivelGain != 0.0 ||
+                            ns.mobilityGain != 0.0;
         for (int it = 0; pulled && it < 40; ++it) {
             const Eigen::Isometry3d cur = forwardKinematics(q);
             Eigen::Matrix<double, 6, 1> e;
@@ -389,7 +444,8 @@ public:
         const size_t n = dof();
         const bool nsActive =
             ns.posture.size() == (Eigen::Index)n ||
-            ns.limitGain != 0.0 || ns.swivelGain != 0.0;
+            ns.limitGain != 0.0 || ns.swivelGain != 0.0 ||
+            ns.mobilityGain != 0.0;
         for (int it = 0; it < opt.maxIter; ++it) {
             const Eigen::Isometry3d cur = forwardKinematics(q);
             const Eigen::Vector3d e =
@@ -825,6 +881,12 @@ private:
                     dp += ns.swivelGain * (Je.transpose() * vE);
                 }
             }
+        }
+        if (ns.mobilityGain != 0.0) {
+            // Mobility ascent — see mobilityGradient. N·dp uses only
+            // the redundant component, so the arm climbs the
+            // manipulability landscape without disturbing the task.
+            dp += ns.mobilityGain * mobilityGradient(q);
         }
         return dp;
     }
