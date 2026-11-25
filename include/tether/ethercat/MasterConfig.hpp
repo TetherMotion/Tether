@@ -20,6 +20,7 @@
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/ProxyForwardConfig.hpp"
+#include "tether/platform/CpuIsolation.hpp"
 #include "tether/ethercat/Types.hpp"
 
 namespace EtherCAT {
@@ -110,16 +111,26 @@ struct CpuIsolationConfig {
     bool prefer_isolated = true; /**< prefer /sys-isolated CPUs */
     bool avoid_cpu0      = true; /**< CPU0 handles most default IRQs */
     /**
-     * Q8 (root, opt-in): create a cgroup2 cpuset partition covering
-     * the claimed CPUs — real isolation without isolcpus=.  Best-
-     * effort: failure degrades to the plain affinity pin + a warning.
+     * Q8 (root, opt-in): create a cpuset partition covering the claimed
+     * CPUs — cgroup v2 isolated partition by default, legacy v1 fallback.
+     * Best-effort: failure degrades to the plain affinity pin + a warning.
      */
     bool create_cpuset = false;
     /**
-     * Q9 (root, opt-in): steer /proc/irq/N/smp_affinity_list off the
-     * claimed CPUs; original masks restored on releaseAll().
+     * cpuset implementation for create_cpuset.  Auto (default) prefers a
+     * cgroup v2 threaded isolated partition and falls back to legacy v1;
+     * the strict values select exactly one backend.
      */
-    bool steer_irqs    = false;
+    Tether::Platform::CpuIsolation::CpusetBackend cpuset_backend =
+        Tether::Platform::CpuIsolation::CpusetBackend::Auto;
+    /**
+     * Q9: automatically steer /proc/irq/N/smp_affinity_list off the claimed
+     * CPUs when permitted.  This is best-effort — missing privileges or
+     * per-IRQ restrictions only warn/degrade coverage, never fail the loop.
+     * Original masks are restored on final claim release/normal exit;
+     * SIGKILL cannot run that restoration.  Set false to opt out.
+     */
+    bool steer_irqs    = true;
 };
 
 struct MemoryLockConfig {

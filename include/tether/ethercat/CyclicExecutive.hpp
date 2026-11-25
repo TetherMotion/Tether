@@ -62,8 +62,8 @@ public:
     enum class SchedClass : uint8_t {
         Auto,  /**< Resolved at thread start: SCHED_FIFO when the cyclic */
                /**< thread runs on a hard-isolated CPU (isolcpus=, an    */
-               /**< isolated cgroup2 cpuset partition, or an exclusive   */
-               /**< cgroup v1 cpuset via create_cpuset), SCHED_DEADLINE  */
+               /**< isolated cgroup2 cpuset partition, or a cpuset       */
+               /**< partition created via create_cpuset), SCHED_DEADLINE */
                /**< otherwise — on a shared CPU, FIFO shares the global  */
                /**< RT-throttle budget and can be dequeued for ~50 ms.   */
         Fifo, /**< SCHED_FIFO @ priority — needs CAP_SYS_NICE */

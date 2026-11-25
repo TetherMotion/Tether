@@ -609,6 +609,7 @@ TEST(MasterAsyncLoop, CpuIsolationClaimsAndReleases) {
 
     Master::AsyncLoopConfig cfg;
     cfg.cpu_isolation.enabled    = true;
+    cfg.cpu_isolation.steer_irqs = false;  // avoid host IRQ side effects in tests
     cfg.cpu_isolation.cyclic_cpu = 0;
     cfg.cpu_isolation.dc_cpu     = 1;   // different CPU → own claim slot
     // DC interval > 0 makes the DC-CPU claim arm run too.
@@ -632,6 +633,7 @@ TEST(MasterAsyncLoop, CpuIsolationDeniedRunsUnpinned) {
 
     Master::AsyncLoopConfig cfg;
     cfg.cpu_isolation.enabled    = true;
+    cfg.cpu_isolation.steer_irqs = false;  // avoid host IRQ side effects in tests
     cfg.cpu_isolation.cyclic_cpu = 9999;   // no such CPU → claim denied
     cfg.cpu_isolation.dc_cpu     = 9999;
     cfg.enable_dc_synchronization = true;

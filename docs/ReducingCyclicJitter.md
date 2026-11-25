@@ -107,7 +107,7 @@ remove.
 | `CAP_SYS_NICE` | `SCHED_FIFO`, CPU affinity pinning |
 | `CAP_IPC_LOCK` (or `RLIMIT_MEMLOCK`) | `mlockall`/`mlock` — page-fault elimination |
 | `CAP_NET_ADMIN` | disabling EEE (`nicDisableEee`), veth, some ethtool writes |
-| root (effectively `CAP_SYS_ADMIN`) | `cpu_isolation.create_cpuset` (exclusive cgroup **v1** cpuset) and `steer_irqs` (/proc/irq rewriting) |
+| root (effectively `CAP_SYS_ADMIN`) | `cpu_isolation.create_cpuset` (cgroup **v2** isolated partition, legacy v1 fallback) and successful automatic `steer_irqs` (/proc/irq rewriting) |
 
 Ways to grant them, in order of preference for production:
 
@@ -130,9 +130,10 @@ runec ./your_app
 sudo ./your_app
 ```
 
-`create_cpuset`/`steer_irqs` need real root — under `runec`/`setcap` they
-degrade to affinity-only claims with a warning, which is fine (still better
-than nothing).
+`create_cpuset` and effective IRQ steering need real root.  IRQ steering is
+automatic by default but strictly best-effort: under `runec`/`setcap` it only
+emits a warning and never fails the claim or loop.  `create_cpuset` likewise
+degrades to affinity-only with a warning, which is still better than nothing.
 
 ---
 
@@ -160,8 +161,8 @@ cfg.exec.priority        = 80;                // used by the FIFO fallback
 // CPU claiming (runtime isolation without reboot)
 cfg.cpu_isolation.enabled      = true;
 cfg.cpu_isolation.cyclic_cpu   = -1;          // auto: prefer isolated, skip CPU0
-cfg.cpu_isolation.create_cpuset = true;       // root: exclusive cgroup v1 cpuset
-cfg.cpu_isolation.steer_irqs    = true;       // root: move IRQs off the claim
+cfg.cpu_isolation.create_cpuset = true;       // root: cgroup v2 isolated cpuset (v1 fallback)
+cfg.cpu_isolation.steer_irqs    = true;       // default: best-effort IRQ steering
 
 // RX latency — busy-poll inside the deadline instead of sleeping.
 // ISOLATED CPU ONLY: every spin ns is charged against the
@@ -192,17 +193,35 @@ The knobs, what they cost, and when to use them:
 | `exchange_placement = Split` | send in Exchange phase, collect in PostExchange — wire RTT overlaps your in-between phases | inputs are one phase older for in-loop readers; use `Atomic` if your motion callback needs *this* cycle's inputs |
 | `SplitLate` | collect in Diagnostics — maximum overlap | only for external motion sources; in-loop readers always see previous-cycle inputs |
 | `sleep_mode = HybridSpin` | sleep to `spin_window_us` before the tick, then busy-poll | **isolated CPUs only**: on a contended CPU the spin itself gets preempted (pays the cost, loses the benefit); under SCHED_DEADLINE the tail is folded into the CBS budget — the exec warns |
-| `sched_class = Auto` (default) | FIFO when the cyclic CPU is hard-isolated (`isolcpus=`, an isolated cgroup2 partition, or the exclusive cgroup v1 cpuset from `create_cpuset`), Deadline otherwise — FIFO on a shared CPU is exposed to `sched_rt_runtime_us` throttling (~50 ms dequeues) | verify the `sched_class=Auto → …` startup log; force either side with `Fifo`/`Deadline` |
+| `sched_class = Auto` (default) | FIFO when the cyclic CPU is hard-isolated (`isolcpus=`, an isolated cgroup2 partition, or a cpuset created by `create_cpuset`), Deadline otherwise — FIFO on a shared CPU is exposed to `sched_rt_runtime_us` throttling (~50 ms dequeues) | verify the `sched_class=Auto → …` startup log; force either side with `Fifo`/`Deadline` |
 | `sched_class = Deadline` | SCHED_DEADLINE CBS: guaranteed runtime per period on a *vanilla* kernel; a runaway RT thread gets throttled, not the system | needs `CONFIG_SCHED_DEADLINE`; runtime≈period fails admission (`EBUSY`) → falls back to FIFO |
 | `dl_auto_measure` | measures P99 work duration for `dl_measure_cycles` (512) on FIFO first, then sets runtime = P99 × (1 + `dl_margin_pct`/100) + the HybridSpin tail if configured | check `es.dl_runtime_ns`/`es.deadline_active` after startup |
 | `exec.disable_rt_throttle` | root: writes `-1` to `sched_rt_runtime_us` at thread start — no more ~50 ms RT-group dequeues | **isolated CPUs only** — on a shared CPU a runaway RT task then starves the core with no recovery window; the exec warns when written non-isolated |
 | `exec.in_cycle_spin_ns` | forwarded `rx_spin_ns + slot_spin_ns` so the exec can warn when spins meet a Deadline runtime | informational — set by `startCyclicLoop`/`startAsyncLoop`, not a user knob |
-| `cpu_isolation.*` | runtime CPU claims; `create_cpuset` builds an exclusive cgroup **v1** cpuset (`/sys/fs/cgroup/cpuset/tether_rt`) that RT threads join via `cgroup.threads`-style per-thread migration — per-thread CPU dedication needs v1 (v2 partitions are process-granular only); `steer_irqs` moves IRQs off | claims without a cpuset/`isolcpus=` are *reservations* — other tasks still preempt; `create_cpuset` needs root + a cpuset-v1 mount (hybrid cgroup layout); pure-v2 systems degrade to affinity-only with a warning |
+| `cpu_isolation.*` | runtime CPU claims; `create_cpuset` auto-selects a cgroup **v2 threaded isolated partition** (preferred) and falls back to the legacy cgroup v1 `cpu_exclusive` cpuset. RT threads join the partition individually; `steer_irqs` automatically moves IRQ affinities off claimed CPUs | claims without a cpuset/`isolcpus=` are *reservations* — other tasks still preempt; `create_cpuset` needs root. The v2 backend temporarily moves the process into a root-level housekeeping cgroup, so systemd-cgroup accounting/limits can be bypassed while active; v1 additionally cannot fully fence parent/root-cpuset tasks |
 | `rx_spin_ns` / `slot_spin_ns` | busy-poll the ring/deposit word instead of ppoll — DMA writes are visible with zero syscalls | **isolated CPUs only** — pure CPU burn inside the deadline AND charged to the SCHED_DEADLINE runtime on shared CPUs; keep `rx_spin_ns` ≪ `rx_budget_ns` |
 | `memory_lock.*` | page faults are 1–10 µs each and can recur forever under memory pressure | all sections default on except `lock_all_process` (heaviest) |
 | `exec.low_timer_slack` | `PR_SET_TIMERSLACK=1ns` — kills the kernel's ~50 µs default slack on sleeps | default on; only matters on the non-RT fallback path |
 | `exec.stack_prefault_bytes` | pre-touches the cyclic thread's stack | default 128 KiB, on |
 | `rx_budget_ns` | collect deadline for the wire reply; 0 = 80 % of cycle | must exceed real RTT — measure `rtt_us_*`; a VLAN hop or switch can push RTT well past 500 µs |
+
+### Validate the isolation empirically
+
+Build and run the Linux-only `cpu_isolation_test` example.  It starts an
+external adversarial process pinned to the same CPU, counts where that
+process actually executes, measures RT-worker throughput loss, and checks
+cgroup teardown afterwards:
+
+```bash
+cmake --build build --target cpu_isolation_test -j8
+sudo ./build/bin/cpu_isolation_test --cpu 7              # auto: v2 → v1
+./build/bin/cpu_isolation_test --cpu 7 --no-cpuset       # affinity-only control
+```
+
+Exit 0 means the adversary executed zero times on the claimed CPU.  The
+output also exposes cgroup-backend selection, per-CPU execution samples,
+and residual throughput loss (which can indicate SMT-sibling, IRQ, or
+cache/memory contention even when scheduler isolation is correct).
 
 ---
 
@@ -236,19 +255,36 @@ your process.  Ordered by impact:
    command line, or keep a `/dev/cpu_dma_latency` fd open at 0 µs from your
    process.  On Pi-class SoCs this is mostly a non-issue.
 
-4. **CPU isolation — use Tether's exclusive cpuset.**  This is the
-   recommended path and it's already configured in Step 2:
-   `cpu_isolation.enabled` + `create_cpuset` + `steer_irqs`, running as
-   root.  The claim then *creates* an exclusive cgroup **v1** cpuset
-   (`/sys/fs/cgroup/cpuset/tether_rt`, `cpu_exclusive=1`) covering the
-   claimed CPUs and moves the cyclic threads' TIDs into its `tasks` file —
-   true per-thread scheduler isolation **without a reboot**, torn down
-   automatically on `stopCyclicLoop`/exit.  Per-thread dedication needs
-   cgroup v1: v2 partitions are process-granular, so on a pure-v2 system
-   (no `/sys/fs/cgroup/cpuset` mount — check before deploying) the claim
-   degrades to affinity-only with a warning.  `steer_irqs` keeps
-   interrupts off the same cores and restores the original masks on
-   release.
+4. **CPU isolation — use Tether's cpuset backend.**  This is the
+   recommended no-reboot path and it's already configured in Step 2:
+   `cpu_isolation.enabled` + `create_cpuset`, running as root.  IRQ steering
+   is attempted automatically by default.  Auto selection first creates a
+   per-process cgroup **v2 threaded
+   isolated partition** covering the claimed CPUs.  Tether creates a
+   housekeeping sibling for the process's ordinary threads, moves RT
+   threads into the isolated partition through `cgroup.threads`, shrinks
+   or removes the partition as claims are released, and restores process
+   membership/IRQ masks on final release.  On legacy hybrid systems it
+   falls back to the v1 `/sys/fs/cgroup/cpuset/tether_rt` `cpu_exclusive`
+   cpuset; v1 can migrate threads, but it does **not** fully fence tasks
+   already in the parent/root cpuset, so it is weaker than v2.
+
+   The v2 backend has an important deployment caveat: per-thread migration
+   requires the process to leave its original domain cgroup (usually a
+   systemd service/scope) and enter Tether's root-level housekeeping cgroup
+   while isolation is active.  Tether attempts to move it back on release,
+   but the original cgroup may already have been garbage-collected; in that
+   case the process falls back to the cgroup root.  Do not combine this
+   with strict systemd resource-control expectations without testing the
+   unit.  Automatic `steer_irqs` keeps interrupts off the same cores when
+   permitted and restores the original masks on release.  If the process is
+   `SIGKILL`ed, empty
+   cgroup directories can outlive it and keep CPUs isolated until the next
+   privileged Tether cpuset setup reaps them (or an administrator removes
+   them) — `atexit` cannot run for SIGKILL.  IRQ mask restoration also
+   cannot run after SIGKILL; because IRQ affinities are global and have no
+   per-process ownership, they may need administrator restoration after such
+   a crash.
 
    Only if the residual floor still isn't low enough, go deeper with
    boot-time `isolcpus=` — it additionally removes the CPU from the
@@ -266,8 +302,10 @@ your process.  Ordered by impact:
    with no extra work.
 
 5. **IRQs.**  Disable `irqbalance` (or ban the cyclic CPU in its config), or
-   let `cpu_isolation.steer_irqs` rewrite `/proc/irq/*/smp_affinity_list` at
-   runtime — it saves originals and restores on release.  To do it by hand:
+   let the default automatic `cpu_isolation.steer_irqs` rewrite
+   `/proc/irq/*/smp_affinity_list` at runtime — it saves originals, restores
+   them on release, and only warns when permission or IRQ restrictions prevent
+   it.  Set it to `false` to opt out.  To do it by hand:
 
    ```bash
    for f in /proc/irq/*/smp_affinity_list; do echo 0-2 | sudo tee "$f"; done
@@ -375,7 +413,8 @@ Still jittery?  The counters tell you which of the three sources remains:
 `backendName()` and `jitter.max_jitter_us`.
 
 **Recommended (root, no reboot):**
-everything above + `cpu_isolation.create_cpuset` + `steer_irqs` +
+everything above + `cpu_isolation.create_cpuset` (with automatic best-effort
+IRQ steering) +
 `sched_class = Auto` (the default picks Deadline on non-isolated CPUs,
 FIFO on isolated ones — check the `sched_class=Auto → …` log line) +
 verify EEE off and coalescing off (the init warnings tell you) +

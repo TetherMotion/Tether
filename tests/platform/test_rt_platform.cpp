@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cstring>
 #include <fstream>
+#include <string>
 #include <thread>
 #ifdef __linux__
 #include <unistd.h>
@@ -24,6 +25,14 @@
 using Tether::Platform::CpuIsolation;
 using namespace Tether::Platform;
 
+namespace {
+CpuIsolation::Spec noIrqSpec() {
+    CpuIsolation::Spec spec;
+    spec.steer_irqs = false;   // unit tests must not rewrite host IRQ state
+    return spec;
+}
+} // namespace
+
 // ============================================================================
 // CpuIsolation
 // ============================================================================
@@ -34,6 +43,19 @@ protected:
         CpuIsolation::instance().releaseAll();
     }
 };
+
+TEST_F(CpuIsolationTest, CpusetBackendDefaultsToAutoAndInactive) {
+    CpuIsolation::Spec spec;
+    EXPECT_EQ(spec.cpuset_backend, CpuIsolation::CpusetBackend::Auto);
+    EXPECT_TRUE(spec.steer_irqs);
+    EXPECT_EQ(CpuIsolation::backendName(CpuIsolation::CpusetBackend::Auto),
+              std::string("auto"));
+    EXPECT_EQ(CpuIsolation::backendName(CpuIsolation::CpusetBackend::CgroupV2),
+              std::string("cgroup-v2"));
+    EXPECT_EQ(CpuIsolation::backendName(CpuIsolation::CpusetBackend::CgroupV1),
+              std::string("cgroup-v1"));
+    EXPECT_FALSE(CpuIsolation::instance().activeCpusetBackend().has_value());
+}
 
 TEST_F(CpuIsolationTest, ReportsOnlineCpus) {
     auto& iso = CpuIsolation::instance();
@@ -46,7 +68,7 @@ TEST_F(CpuIsolationTest, ClaimReturnsAValidCpu) {
     auto& iso = CpuIsolation::instance();
     if (iso.onlineCount() < 2) GTEST_SKIP() << "need >=2 CPUs for a claim";
 
-    CpuIsolation::Spec spec;
+    auto spec = noIrqSpec();
     auto c = iso.claim(spec);
     ASSERT_TRUE(c.valid());
     EXPECT_GE(c.cpu, 0);
@@ -65,7 +87,7 @@ TEST_F(CpuIsolationTest, NeverGrantsLastCpu) {
     // Claim until refusal — the allocator must always refuse the last one.
     int granted = 0;
     for (int i = 0; i < online + 2; ++i) {
-        auto c = iso.claim(CpuIsolation::Spec{});
+        auto c = iso.claim(noIrqSpec());
         if (!c.valid()) break;
         ++granted;
     }
@@ -79,7 +101,7 @@ TEST_F(CpuIsolationTest, ExplicitRequestHonouredAndConflictDetected) {
     if (iso.onlineCount() < 2) GTEST_SKIP();
 
     const int cpu = iso.onlineCount() - 1;  // last CPU: rarely CPU0
-    CpuIsolation::Spec spec;
+    auto spec = noIrqSpec();
     spec.requested_cpu = cpu;
     auto c = iso.claim(spec);
     ASSERT_TRUE(c.valid());
@@ -94,7 +116,7 @@ TEST_F(CpuIsolationTest, ReleaseReturnsCpuToPool) {
     auto& iso = CpuIsolation::instance();
     if (iso.onlineCount() < 2) GTEST_SKIP();
 
-    auto c = iso.claim(CpuIsolation::Spec{});
+    auto c = iso.claim(noIrqSpec());
     ASSERT_TRUE(c.valid());
     const int before = iso.freeCount();
     iso.release(c.cpu);
@@ -107,15 +129,15 @@ TEST_F(CpuIsolationTest, ReleaseReturnsCpuToPool) {
 TEST_F(CpuIsolationTest, ReleaseAllClearsEverything) {
     auto& iso = CpuIsolation::instance();
     if (iso.onlineCount() < 3) GTEST_SKIP();
-    iso.claim(CpuIsolation::Spec{});
-    iso.claim(CpuIsolation::Spec{});
+    iso.claim(noIrqSpec());
+    iso.claim(noIrqSpec());
     iso.releaseAll();
     EXPECT_TRUE(iso.claimedCpus().empty());
 }
 
 TEST_F(CpuIsolationTest, OfflineCpuRequestDenied) {
     auto& iso = CpuIsolation::instance();
-    CpuIsolation::Spec spec;
+    auto spec = noIrqSpec();
     spec.requested_cpu = 250;   // almost certainly not online
     // If the box genuinely has 251+ CPUs, pick one past the max instead.
     if (spec.requested_cpu < iso.onlineCount()) spec.requested_cpu = 255;

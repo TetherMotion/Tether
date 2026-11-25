@@ -78,6 +78,7 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
         spec.prefer_isolated = config.cpu_isolation.prefer_isolated;
         spec.avoid_cpu0      = config.cpu_isolation.avoid_cpu0;
         spec.create_cpuset   = config.cpu_isolation.create_cpuset;
+        spec.cpuset_backend  = config.cpu_isolation.cpuset_backend;
         spec.steer_irqs      = config.cpu_isolation.steer_irqs;
         spec.requested_cpu   = config.cpu_isolation.cyclic_cpu;
         auto c = iso.claim(spec);

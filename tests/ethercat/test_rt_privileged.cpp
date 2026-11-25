@@ -1236,6 +1236,7 @@ TEST_F(RtSchedTest, CpuClaimNeverExhaustsMachine) {
 TEST_F(RtSchedTest, CpuClaimExplicitAndRelease) {
     auto& iso = Tether::Platform::CpuIsolation::instance();
     Tether::Platform::CpuIsolation::Spec spec;
+    spec.steer_irqs = false;   // avoid host IRQ side effects in tests
     spec.requested_cpu = 1;
     auto c = iso.claim(spec);
     ASSERT_TRUE(c.valid());
@@ -1257,6 +1258,7 @@ TEST_F(RtSchedTest, MasterCpuIsolationClaimsReleasedOnStop) {
 
     Master::CyclicLoopConfig cfg;
     cfg.cpu_isolation.enabled = true;
+    cfg.cpu_isolation.steer_irqs = false;
     cfg.motion_in_loop = false;
     ASSERT_TRUE(master.startCyclicLoop(cfg));
     EXPECT_TRUE(master.isCyclicLoopRunning());

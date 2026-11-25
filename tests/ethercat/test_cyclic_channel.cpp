@@ -2581,6 +2581,7 @@ TEST_F(MasterCyclicTest, LowLatencyPreset) {
     EXPECT_EQ(cfg.cycle_period_us, 500u);
     EXPECT_EQ(cfg.exchange_placement, Master::ExchangePlacement::Split);
     EXPECT_TRUE(cfg.cpu_isolation.enabled);
+    EXPECT_TRUE(cfg.cpu_isolation.steer_irqs);  // automatic best-effort default
     EXPECT_EQ(cfg.wire_mode, CyclicWireMode::Auto);
     EXPECT_FALSE(cfg.dc_config.has_value());
     // Default arg is 1 kHz.

@@ -84,6 +84,14 @@ function(add_tether_example name)
     target_compile_features(${name} PRIVATE cxx_std_20)
 endfunction()
 
+# --- CPU isolation empirical test ---
+# Uses Linux scheduler/cgroup interfaces directly and is intentionally kept
+# independent of EtherCAT so it can run as a focused host diagnostic.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_tether_example(cpu_isolation_test
+        LIBRARIES tether_common)
+endif()
+
 # --- Modbus examples (sources live in examples/modbus/) ---
 if(TARGET tether_modbus)
     # master role
