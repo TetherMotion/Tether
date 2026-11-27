@@ -27,6 +27,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
+#include <cmath>
 #include <random>
 #include <string>
 #include <vector>
@@ -452,6 +453,42 @@ TEST_F(PandaTest, RneaAndGravityMatchPinocchio) {
                     1e-8)
                     << "M[" << i << "," << j << "]";
     }
+}
+
+TEST_F(PandaTest, PoseIKPlateauExitBoundsRealtimeWork) {
+    // A far-outside-workspace target can never satisfy the strict IK
+    // tolerance. Real-time callers opt into plateau detection so the
+    // solve stops at the stationary point instead of burning the whole
+    // control period in every cycle.
+    Eigen::VectorXd q0 = Eigen::VectorXd::Zero(7);
+    Eigen::Isometry3d target = ex.chain.forwardKinematics(q0);
+    target.translation().x() += 2.0;
+    NullspaceRef ns;
+    ns.posture = q0;
+    ns.postureGain = 0.2;
+
+    SerialChain::IKOptions bounded;
+    bounded.maxIter = 60;
+    bounded.nsSettle = false;
+    bounded.plateauIters = 6;
+    int boundedIters = 0;
+    bounded.iterationCount = &boundedIters;
+    Eigen::VectorXd qBounded = q0;
+    double resBounded = 0.0;
+    EXPECT_FALSE(ex.chain.poseIK(target, qBounded, bounded,
+                                 &resBounded, ns));
+    EXPECT_LT(boundedIters, 40);
+    EXPECT_TRUE(std::isfinite(resBounded));
+
+    SerialChain::IKOptions exact = bounded;
+    exact.plateauIters = 0;
+    int exactIters = 0;
+    exact.iterationCount = &exactIters;
+    Eigen::VectorXd qExact = q0;
+    double resExact = 0.0;
+    EXPECT_FALSE(ex.chain.poseIK(target, qExact, exact,
+                                 &resExact, ns));
+    EXPECT_GT(exactIters, boundedIters);
 }
 
 TEST_F(PandaTest, PoseIKOnSevenDof) {

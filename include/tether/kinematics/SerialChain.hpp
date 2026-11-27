@@ -31,6 +31,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -319,6 +320,16 @@ public:
         /// per call and the DOF relaxes toward the objective over
         /// many cycles without disturbing the task.
         bool nsSettle{true};
+        /// Plateau early-exit for bounded real-time solves [iterations].
+        /// Zero preserves the default exact/standalone behaviour: keep
+        /// iterating to maxIter even when the target is unreachable.
+        int plateauIters{0};
+        /// Fractional residual improvement that counts as progress while
+        /// plateau detection is enabled [1].
+        double plateauImprovement{2e-2};
+        /// Optional diagnostic receiving the total number of DLS
+        /// iterations performed, including the final polish phase.
+        int* iterationCount{nullptr};
     };
 
     /**
@@ -343,7 +354,41 @@ public:
                 const IKOptions& opt, double* residual = nullptr,
                 const NullspaceRef& ns = NullspaceRef()) const {
         const size_t n = dof();
+        // Unreachable or quasi-singular targets never satisfy the strict
+        // convergence test, but they do reach a DLS stationary point long
+        // before maxIter. When plateau detection is enabled, stop the
+        // nullspace-coupled phase there and let the pure-DLS polish below
+        // finish or confirm the stationary point instead of spending the
+        // whole real-time control budget repeating a step that no longer
+        // improves the residual. qBest keeps the best iterate in case a
+        // damped step overshoots before the plateau is detected.
+        double bestRn = std::numeric_limits<double>::infinity();
+        Eigen::VectorXd qBest = q;
+        int stalled = 0;
+        const auto noteResidual = [&](double rn) {
+            if (opt.plateauIters <= 0) return false;
+            if (!std::isfinite(bestRn)) {
+                bestRn = rn;
+                qBest = q;
+                return false;
+            }
+            const double tol = std::max(
+                1e-8, opt.plateauImprovement * std::max(bestRn, 1e-12));
+            if (rn < bestRn - tol) {
+                bestRn = rn;
+                qBest = q;
+                stalled = 0;
+            } else {
+                ++stalled;
+            }
+            if (stalled >= opt.plateauIters) {
+                q = qBest;
+                return true;
+            }
+            return false;
+        };
         for (int it = 0; it < opt.maxIter; ++it) {
+            if (opt.iterationCount) ++*opt.iterationCount;
             const Eigen::Isometry3d cur = forwardKinematics(q);
             Eigen::Matrix<double, 6, 1> e;
             e.head<3>() = target.translation() - cur.translation();
@@ -382,6 +427,8 @@ public:
                 if (residual) *residual = rn;
                 return true;
             }
+            if (noteResidual(rn))
+                break;
             dq += dns;
             const double step = dq.cwiseAbs().maxCoeff();
             if (step > opt.maxStep) dq *= opt.maxStep / step;
@@ -402,17 +449,39 @@ public:
                             ns.limitGain != 0.0 ||
                             ns.swivelGain != 0.0 ||
                             ns.mobilityGain != 0.0;
+        double bestPolishRn = std::numeric_limits<double>::infinity();
+        Eigen::VectorXd qPolishBest = q;
+        int polishStalled = 0;
         for (int it = 0; pulled && it < 40; ++it) {
+            if (opt.iterationCount) ++*opt.iterationCount;
             const Eigen::Isometry3d cur = forwardKinematics(q);
             Eigen::Matrix<double, 6, 1> e;
             e.head<3>() = target.translation() - cur.translation();
             const Eigen::AngleAxisd aa(cur.rotation().transpose() *
                                        target.rotation());
             e.tail<3>() = cur.rotation() * (aa.axis() * aa.angle());
+            const double polishRn = e.norm();
             if (e.head<3>().norm() < opt.tolPos &&
                 e.tail<3>().norm() < opt.tolOri) {
                 if (residual) *residual = e.norm();
                 return true;
+            }
+            const bool firstPolish = !std::isfinite(bestPolishRn);
+            if (firstPolish) {
+                bestPolishRn = polishRn;
+                qPolishBest = q;
+            }
+            const double polishTol = std::max(
+                1e-8, opt.plateauImprovement * std::max(bestPolishRn, 1e-12));
+            if (!firstPolish && polishRn < bestPolishRn - polishTol) {
+                bestPolishRn = polishRn;
+                qPolishBest = q;
+                polishStalled = 0;
+            } else if (!firstPolish && opt.plateauIters > 0 &&
+                       ++polishStalled >= opt.plateauIters) {
+                q = qPolishBest;
+                if (residual) *residual = bestPolishRn;
+                return false;
             }
             const Eigen::MatrixXd J = jacobian(q);
             Eigen::VectorXd dq = dampedPinv(J, opt.lambda) * e;
